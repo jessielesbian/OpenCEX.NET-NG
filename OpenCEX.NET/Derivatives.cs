@@ -1,10 +1,11 @@
 using jessielesbian.OpenCEX.oracle;
-using jessielesbian.OpenCEX.SafeMath;
+
 using MySql.Data.MySqlClient;
 using System;
 using System.Collections.Generic;
 using System.Data;
 using System.Threading;
+using System.Numerics;
 
 namespace jessielesbian.OpenCEX
 {
@@ -12,7 +13,7 @@ namespace jessielesbian.OpenCEX
 		public static readonly ulong derivativesExpiry;
 		private static void DerivativesSettlementThread(){
 			Queue<ConcurrentJob> waiting = new Queue<ConcurrentJob>();
-			Dictionary<string, SafeUint> priceCaches = new Dictionary<string, SafeUint>();
+			Dictionary<string, BigInteger> priceCaches = new Dictionary<string, BigInteger>();
 			while (!abort)
 			{
 				try{
@@ -29,7 +30,7 @@ namespace jessielesbian.OpenCEX
 							string longname = mySqlDataReader.GetString("Name");
 							int pivot = longname.LastIndexOf('_');
 							string underlying = longname.Substring(0, pivot);
-							if (!priceCaches.TryGetValue(underlying, out SafeUint price))
+							if (!priceCaches.TryGetValue(underlying, out BigInteger price))
 							{
 								{
 									CheckSafety(oracles.TryGetValue(underlying, out IOracle oracle), "Missing oracle!");
@@ -42,8 +43,8 @@ namespace jessielesbian.OpenCEX
 										//BATTLE SHORT this mode of failure
 										continue;
 									}
-									if(price is null){
-										continue; //Oracle failure
+									if(price == BigInteger.MinusOne){
+										continue;
 									}
 								}
 
@@ -94,18 +95,18 @@ namespace jessielesbian.OpenCEX
 		private sealed class DerivativesSettlementJob : ConcurrentJob
 		{
 			private readonly IDerivativeContract derivativeContract;
-			private readonly SafeUint nextStrike;
+			private readonly BigInteger nextStrike;
 			private readonly string longname;
 			private readonly string shortname;
 			private readonly ulong nextExpiry;
 
-			public DerivativesSettlementJob(string longname, string shortname, ulong nextExpiry, IDerivativeContract derivativeContract, SafeUint nextStrike)
+			public DerivativesSettlementJob(string longname, string shortname, ulong nextExpiry, IDerivativeContract derivativeContract, BigInteger nextStrike)
 			{
 				this.longname = longname ?? throw new ArgumentNullException(nameof(longname));
 				this.shortname = shortname ?? throw new ArgumentNullException(nameof(shortname));
 				this.nextExpiry = nextExpiry;
 				this.derivativeContract = derivativeContract ?? throw new ArgumentNullException(nameof(derivativeContract));
-				this.nextStrike = nextStrike ?? throw new ArgumentNullException(nameof(nextStrike));
+				this.nextStrike = nextStrike;
 			}
 
 			protected override object ExecuteIMPL()
@@ -115,14 +116,14 @@ namespace jessielesbian.OpenCEX
 				MySqlCommand command = sql.GetCommand("SELECT Strike FROM Derivatives WHERE Name = @coin FOR UPDATE;");
 				command.Parameters.AddWithValue("@coin", longname);
 				command.Prepare();
-				SafeUint strike;
+				BigInteger strike;
 				using(MySqlDataReader tmpreader2 = command.ExecuteReader()){
 					CheckSafety(tmpreader2.Read(), "Missing derivatives record!");
-					strike = GetSafeUint(tmpreader2.GetString("Strike"));
+					strike = GetBigInteger(tmpreader2.GetString("Strike"));
 					tmpreader2.CheckSingletonResult();
 				}
-				SafeUint longPayouts = derivativeContract.CalculateLongPayout(strike, nextStrike);
-				SafeUint shortPayouts = derivativeContract.CalculateShortPayout(strike, nextStrike);
+				BigInteger longPayouts = derivativeContract.CalculateLongPayout(strike, nextStrike);
+				BigInteger shortPayouts = derivativeContract.CalculateShortPayout(strike, nextStrike);
 				CheckSafety2(longPayouts.Add(shortPayouts) > derivativeContract.CalculateMaxShortLoss(strike), "Negative balances while settling negative balances protected derivatives!");
 
 				//Balances
@@ -164,21 +165,21 @@ namespace jessielesbian.OpenCEX
 				return null;
 			}
 
-			private void Settle2(SQLCommandFactory sql, MySqlCommand mySqlCommand, SafeUint payout, byte mode){
-				if(!payout.isZero){
+			private void Settle2(SQLCommandFactory sql, MySqlCommand mySqlCommand, BigInteger payout, byte mode){
+				if(!payout.IsZero){
 					using MySqlDataReader reader = mySqlCommand.ExecuteReader();
 					while (reader.Read())
 					{
-						SafeUint balance;
+						BigInteger balance;
 						ulong userid;
 						if (mode == 2)
 						{
-							balance = GetSafeUint(reader.GetString("Amount")).Min(GetSafeUint(reader.GetString("InitialAmount")).Sub(GetSafeUint(reader.GetString("TotalCost"))));
+							balance = GetBigInteger(reader.GetString("Amount")).Min(GetBigInteger(reader.GetString("InitialAmount")).Sub(GetBigInteger(reader.GetString("TotalCost"))));
 							userid = reader.GetUInt64("PlacedBy");
 						}
 						else
 						{
-							balance = GetSafeUint(reader.GetString("Balance"));
+							balance = GetBigInteger(reader.GetString("Balance"));
 							userid = reader.GetUInt64("UserID");
 						}
 						if (userid != 0)
@@ -196,15 +197,15 @@ namespace jessielesbian.OpenCEX
 			/// <summary>
 			/// The maximum loss short positions can incur, and the maximum profits long positions can make
 			/// </summary>
-			public abstract SafeUint CalculateMaxShortLoss(SafeUint strike);
+			public abstract BigInteger CalculateMaxShortLoss(BigInteger strike);
 			/// <summary>
 			/// Calculates the payout for long positions
 			/// </summary>
-			public abstract SafeUint CalculateLongPayout(SafeUint strike, SafeUint price);
+			public abstract BigInteger CalculateLongPayout(BigInteger strike, BigInteger price);
 			/// <summary>
 			/// Calculates the payout for short positions
 			/// </summary>
-			public abstract SafeUint CalculateShortPayout(SafeUint strike, SafeUint price);
+			public abstract BigInteger CalculateShortPayout(BigInteger strike, BigInteger price);
 		}
 
 		/// <summary>
@@ -217,7 +218,7 @@ namespace jessielesbian.OpenCEX
 			private PutOption(){
 				
 			}
-			public SafeUint CalculateLongPayout(SafeUint strike, SafeUint price)
+			public BigInteger CalculateLongPayout(BigInteger strike, BigInteger price)
 			{
 				if (price > strike)
 				{
@@ -231,12 +232,12 @@ namespace jessielesbian.OpenCEX
 				}
 			}
 
-			public SafeUint CalculateMaxShortLoss(SafeUint strike)
+			public BigInteger CalculateMaxShortLoss(BigInteger strike)
 			{
 				return strike;
 			}
 
-			public SafeUint CalculateShortPayout(SafeUint strike, SafeUint price)
+			public BigInteger CalculateShortPayout(BigInteger strike, BigInteger price)
 			{
 				return price.Min(strike);
 			}

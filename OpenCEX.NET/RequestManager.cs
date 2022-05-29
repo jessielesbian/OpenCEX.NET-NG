@@ -4,7 +4,7 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Net;
 using jessielesbian.OpenCEX.RequestManager;
-using jessielesbian.OpenCEX.SafeMath;
+
 using MySql.Data.MySqlClient;
 using System.Text;
 using System.Numerics;
@@ -200,7 +200,7 @@ namespace jessielesbian.OpenCEX{
 				{
 					refund = mySqlDataReader.GetString("Pri");
 				}
-				SafeUint amount = GetSafeUint(mySqlDataReader.GetString("InitialAmount")).Sub(GetSafeUint(mySqlDataReader.GetString("TotalCost")));
+				BigInteger amount = GetBigInteger(mySqlDataReader.GetString("InitialAmount")).Sub(GetBigInteger(mySqlDataReader.GetString("TotalCost")));
 
 				mySqlDataReader.CheckSingletonResult();
 				request.sqlCommandFactory.SafeDestroyReader();
@@ -233,14 +233,14 @@ namespace jessielesbian.OpenCEX{
 			{
 				//Safety checks
 				long fillMode = request.ExtractRequestArg<long>("fill_mode");
-				SafeUint price = request.ExtractSafeUint("price");
-				SafeUint amount = request.ExtractSafeUint("amount");
+				BigInteger price = request.ExtractBigInteger("price");
+				BigInteger amount = request.ExtractBigInteger("amount");
 				string primary = request.ExtractRequestArg<string>("primary");
 				string secondary = request.ExtractRequestArg<string>("secondary");
 				bool buy = request.ExtractRequestArg<bool>("buy");
 				if (buy)
 				{
-					CheckSafety2(price.isZero, "Zero-price buy order!");
+					CheckSafety2(price.IsZero, "Zero-price buy order!");
 				}
 
 				CheckSafety(fillMode > -1, "Invalid fill mode!");
@@ -257,7 +257,7 @@ namespace jessielesbian.OpenCEX{
 				string selected;
 				string output;
 				bool sell;
-				SafeUint amt2;
+				BigInteger amt2;
 				MySqlCommand counter;
 				if (buy)
 				{
@@ -281,12 +281,12 @@ namespace jessielesbian.OpenCEX{
 
 				if (fillMode == 0)
 				{
-					CheckSafety2(amount.isZero, "Zero limit order size!");
-					CheckSafety2(amount < GetSafeUint(GetEnv("MinimumLimit_" + selected)), "Order is smaller than minimum limit order size!");
+					CheckSafety2(amount.IsZero, "Zero limit order size!");
+					CheckSafety2(amount < GetBigInteger(GetEnv("MinimumLimit_" + selected)), "Order is smaller than minimum limit order size!");
 				}
 
 				Queue<Order> moddedOrders = new Queue<Order>();
-				SafeUint close = null;
+				BigInteger close = BigInteger.MinusOne;
 
 				ulong userid = request.GetUserID();
 				request.Debit(selected, userid, amount, true);
@@ -294,18 +294,18 @@ namespace jessielesbian.OpenCEX{
 				LPReserve lpreserve = new LPReserve(request.sqlCommandFactory, primary, secondary);
 				MySqlDataReader reader = request.sqlCommandFactory.SafeExecuteReader(counter);
 				Order instance = new Order(price, amt2, amount, zero, userid, 0);
-				SafeUint old = lpreserve.reserve0;
+				BigInteger old = lpreserve.reserve0;
 				if (reader.HasRows)
 				{
 					bool read = true;
 					while (read)
 					{
-						Order other = new Order(GetSafeUint(reader.GetString("Price")), GetSafeUint(reader.GetString("Amount")), GetSafeUint(reader.GetString("InitialAmount")), GetSafeUint(reader.GetString("TotalCost")), reader.GetUInt64("PlacedBy"), reader.GetUInt64("Id"));
+						Order other = new Order(GetBigInteger(reader.GetString("Price")), GetBigInteger(reader.GetString("Amount")), GetBigInteger(reader.GetString("InitialAmount")), GetBigInteger(reader.GetString("TotalCost")), reader.GetUInt64("PlacedBy"), reader.GetUInt64("Id"));
 						if ((buy && instance.price < other.price) || (sell && instance.price > other.price))
 						{
 							break;
 						}
-						if (other.Balance.isZero || other.amount.isZero)
+						if (other.Balance.IsZero || other.amount.IsZero)
 						{
 							read = reader.Read();
 							continue;
@@ -316,9 +316,9 @@ namespace jessielesbian.OpenCEX{
 						{
 							close = lpreserve.reserve0.Mul(ether).Div(lpreserve.reserve1);
 						}
-						SafeUint oldamt1 = instance.Balance;
-						SafeUint oldamt2 = other.Balance;
-						if (oldamt1.isZero || instance.amount.isZero)
+						BigInteger oldamt1 = instance.Balance;
+						BigInteger oldamt2 = other.Balance;
+						if (oldamt1.IsZero || instance.amount.IsZero)
 						{
 							break;
 						}
@@ -326,11 +326,11 @@ namespace jessielesbian.OpenCEX{
 						{
 							moddedOrders.Enqueue(other);
 							close = other.price;
-							SafeUint outamt = oldamt1.Sub(instance.Balance);
+							BigInteger outamt = oldamt1.Sub(instance.Balance);
 							request.Credit(output, userid, oldamt2.Sub(other.Balance), true);
 							request.Credit(selected, other.placedby, outamt, true);
 							read = reader.Read();
-							if (!other.Balance.isZero)
+							if (!other.Balance.IsZero)
 							{
 								lpreserve = TryArb(request.sqlCommandFactory, primary, secondary, sell, other, other.price, lpreserve);
 							}
@@ -343,8 +343,8 @@ namespace jessielesbian.OpenCEX{
 				}
 
 				request.sqlCommandFactory.SafeDestroyReader();
-				SafeUint balance2 = instance.Balance;
-				if (!balance2.isZero)
+				BigInteger balance2 = instance.Balance;
+				if (!balance2.IsZero)
 				{
 					//Fill the rest of the order with Uniswap.NET
 					old = lpreserve.reserve0;
@@ -355,7 +355,7 @@ namespace jessielesbian.OpenCEX{
 					}
 
 					//Tail safety check
-					SafeUint amount3;
+					BigInteger amount3;
 					balance2 = instance.Balance;
 					if (buy)
 					{
@@ -367,7 +367,7 @@ namespace jessielesbian.OpenCEX{
 					}
 
 					//We only save the order to database if it's a limit order and it's not fully executed.
-					if (instance.amount.isZero || fillMode == 1)
+					if (instance.amount.IsZero || fillMode == 1)
 					{
 						//Cancel order
 						request.Credit(selected, userid, instance.Balance, true);
@@ -404,17 +404,17 @@ namespace jessielesbian.OpenCEX{
 				while (moddedOrders.TryDequeue(out Order modded))
 				{
 					MySqlCommand action;
-					if (modded.amount.isZero)
+					if (modded.amount.IsZero)
 					{
-						SafeUint balance = modded.Balance;
-						if (!balance.isZero)
+						BigInteger balance = modded.Balance;
+						if (!balance.IsZero)
 						{
 							request.Credit(output, modded.placedby, balance, true);
 						}
 
 						action = delete;
 					}
-					else if (modded.Balance.isZero)
+					else if (modded.Balance.IsZero)
 					{
 						action = delete;
 					}
@@ -428,7 +428,7 @@ namespace jessielesbian.OpenCEX{
 					action.SafeExecuteNonQuery();
 				}
 
-				if (close != null)
+				if (close > BigInteger.MinusOne)
 				{
 					//Async update chart to avoid blocking request/failure propagation
 					request.sqlCommandFactory.AfterCommit(new UpdateChart(primary, secondary, close));
@@ -451,13 +451,13 @@ namespace jessielesbian.OpenCEX{
 		{
 			private readonly string primary;
 			private readonly string secondary;
-			private readonly SafeUint update;
+			private readonly BigInteger update;
 
-			public UpdateChart(string primary, string secondary, SafeUint update)
+			public UpdateChart(string primary, string secondary, BigInteger update)
 			{
 				this.primary = primary ?? throw new ArgumentNullException(nameof(primary));
 				this.secondary = secondary ?? throw new ArgumentNullException(nameof(secondary));
-				this.update = update ?? throw new ArgumentNullException(nameof(update));
+				this.update = update;
 			}
 
 			protected override object ExecuteIMPL()
@@ -471,30 +471,30 @@ namespace jessielesbian.OpenCEX{
 					prepared.Parameters.AddWithValue("@secondary", secondary);
 					prepared.Prepare();
 					MySqlDataReader reader = sqlCommandFactory.SafeExecuteReader(prepared);
-					SafeUint start = new SafeUint(new BigInteger(DateTimeOffset.Now.ToUnixTimeSeconds()));
+					BigInteger start = new BigInteger(DateTimeOffset.Now.ToUnixTimeSeconds());
 					start = start.Sub(start.Mod(day));
-					SafeUint high;
-					SafeUint low;
-					SafeUint open;
-					SafeUint time;
-					SafeUint close = update;
+					BigInteger high;
+					BigInteger low;
+					BigInteger open;
+					BigInteger time;
+					BigInteger close = update;
 					bool append;
 					if (reader.HasRows)
 					{
-						time = GetSafeUint(reader.GetString("Timestamp"));
+						time = GetBigInteger(reader.GetString("Timestamp"));
 						append = start.Sub(time) > day;
 						if (append)
 						{
-							open = GetSafeUint(reader.GetString("Close"));
+							open = GetBigInteger(reader.GetString("Close"));
 							high = open.Max(close);
 							low = open.Min(close);
 							time = start;
 						}
 						else
 						{
-							open = GetSafeUint(reader.GetString("Open"));
-							high = GetSafeUint(reader.GetString("High"));
-							low = GetSafeUint(reader.GetString("Low"));
+							open = GetBigInteger(reader.GetString("Open"));
+							high = GetBigInteger(reader.GetString("High"));
+							low = GetBigInteger(reader.GetString("Low"));
 						}
 
 					}
@@ -558,7 +558,7 @@ namespace jessielesbian.OpenCEX{
 
 		public static bool MatchOrders(Order first, Order second, bool buy)
 		{
-			SafeUint ret = first.amount.Min(second.amount);
+			BigInteger ret = first.amount.Min(second.amount);
 			if (buy)
 			{
 				ret = ret.Min(first.Balance.Mul(ether).Div(second.price)).Min(second.Balance);
@@ -569,7 +569,7 @@ namespace jessielesbian.OpenCEX{
 				else
 				{
 					first.Debit(ret, second.price);
-					second.Debit(ret);
+					second.Debit(ret, ether);
 				}
 			}
 			else
@@ -581,55 +581,46 @@ namespace jessielesbian.OpenCEX{
 				}
 				else
 				{
-					first.Debit(ret);
+					first.Debit(ret, ether);
 					second.Debit(ret, second.price);
 				}
 			}
-			CheckSafety2(ret.isZero, "Order matched without output (should not reach here)!", true);
+			CheckSafety2(ret.IsZero, "Order matched without output (should not reach here)!", true);
 			return true;
 		}
 
 		public class Order
 		{
-			public readonly SafeUint price;
-			public SafeUint amount;
-			public readonly SafeUint initialAmount;
-			public SafeUint totalCost;
+			public readonly BigInteger price;
+			public BigInteger amount;
+			public readonly BigInteger initialAmount;
+			public BigInteger totalCost;
 			public readonly ulong placedby;
 			public readonly ulong id;
 
-			public Order(SafeUint price, SafeUint amount, SafeUint initialAmount, SafeUint totalCost, ulong placedby, ulong id)
+			public Order(BigInteger price, BigInteger amount, BigInteger initialAmount, BigInteger totalCost, ulong placedby, ulong id)
 			{
-				this.initialAmount = initialAmount ?? throw new ArgumentNullException(nameof(initialAmount));
-				this.totalCost = totalCost ?? throw new ArgumentNullException(nameof(totalCost));
-				this.price = price ?? throw new ArgumentNullException(nameof(price));
-				this.amount = amount ?? throw new ArgumentNullException(nameof(amount));
+				this.initialAmount = initialAmount;
+				this.totalCost = totalCost;
+				this.price = price;
+				this.amount = amount;
 				this.id = id;
 				this.placedby = placedby;
 				Balance = initialAmount.Sub(totalCost);
 			}
-			public void Debit(SafeUint amt, SafeUint price = null)
+			public void Debit(BigInteger amt, BigInteger price)
 			{
-				SafeUint temp;
-
-				if (price is null)
-				{
-					temp = totalCost.Add(amt);
-				}
-				else
-				{
-					temp = totalCost.Add(amt.Mul(price).Div(ether));
-				}
+				BigInteger temp = totalCost.Add(amt.Mul(price).Div(ether));
 				Balance = initialAmount.Sub(temp, "Negative order size (should not reach here)!", true);
 				amount = amount.Sub(amt, "Negative order amount (should not reach here)!", true);
 				totalCost = temp;
 			}
 
-			public SafeUint Balance;
+			public BigInteger Balance;
 		}
 
 		//Ported from PHP server
-		private static SafeUint GetBidOrAsk(SQLCommandFactory sqlCommandFactory, string pri, string sec, bool bid)
+		private static BigInteger GetBidOrAsk(SQLCommandFactory sqlCommandFactory, string pri, string sec, bool bid)
 		{
 			MySqlCommand mySqlCommand;
 			if (bid)
@@ -645,16 +636,16 @@ namespace jessielesbian.OpenCEX{
 			mySqlCommand.Parameters.AddWithValue("@secondary", sec);
 			mySqlCommand.Prepare();
 			MySqlDataReader reader = sqlCommandFactory.SafeExecuteReader(mySqlCommand);
-			SafeUint returns;
+			BigInteger returns;
 			if (reader.HasRows)
 			{
-				returns = GetSafeUint(reader.GetString("Price"));
+				returns = GetBigInteger(reader.GetString("Price"));
 				reader.CheckSingletonResult();
 
 			}
 			else
 			{
-				returns = null;
+				returns = BigInteger.MinusOne;
 			}
 			sqlCommandFactory.SafeDestroyReader();
 			return returns;
@@ -672,7 +663,7 @@ namespace jessielesbian.OpenCEX{
 				string pri = request.ExtractRequestArg<string>("primary");
 				string sec = request.ExtractRequestArg<string>("secondary");
 
-				return new string[] { SafeSerializeSafeUint(GetBidOrAsk(request.sqlCommandFactory, pri, sec, true)), SafeSerializeSafeUint(GetBidOrAsk(request.sqlCommandFactory, pri, sec, false)) };
+				return new string[] { SafeSerializeBigInteger(GetBidOrAsk(request.sqlCommandFactory, pri, sec, true)), SafeSerializeBigInteger(GetBidOrAsk(request.sqlCommandFactory, pri, sec, false)) };
 			}
 
 			protected override bool NeedRedis()
@@ -786,16 +777,16 @@ namespace jessielesbian.OpenCEX{
 						break;
 				}
 
-				SafeUint gasPrice = walletManager.GetGasPrice();
+				BigInteger gasPrice = walletManager.GetGasPrice();
 
 				//Boost gas price to reduce server waiting time.
 				gasPrice = gasPrice.Add(gasPrice.Div(ten));
-				SafeUint amount;
+				BigInteger amount;
 
 				if (token_address is null)
 				{
 					amount = walletManager.GetEthBalance().Sub(gasPrice.Mul(basegas), "Amount not enough to cover blockchain fee!", false);
-					CheckSafety2(amount.isZero, "Zero-value deposit!");
+					CheckSafety2(amount.IsZero, "Zero-value deposit!");
 					walletManager.Unsafe_SafeSendEther(request.sqlCommandFactory, amount, ExchangeWalletAddress, gasPrice, basegas, null, userid, true, token, zero, "shitcoin");
 				}
 				else
@@ -822,17 +813,17 @@ namespace jessielesbian.OpenCEX{
 					}
 					try
 					{
-						amount = GetSafeUint(walletManager.Vcall(ERC20DepositManager, gasPrice, zero, abi2));
+						amount = GetBigInteger(walletManager.Vcall(ERC20DepositManager, gasPrice, zero, abi2));
 					}
 					catch
 					{
-						amount = GetSafeUint(walletManager.Vcall(ERC20DepositManager, zero, zero, abi2));
+						amount = GetBigInteger(walletManager.Vcall(ERC20DepositManager, zero, zero, abi2));
 					}
 
-					CheckSafety2(amount.isZero, "Zero-value deposit!");
+					CheckSafety2(amount.IsZero, "Zero-value deposit!");
 					string abi = "0x64d7cd50" + postfix + amount.ToHex(false);
-					SafeUint gas = walletManager.EstimateGas(ERC20DepositManager, gasPrice, zero, abi);
-					SafeUint gasFees = gas.Mul(gasPrice);
+					BigInteger gas = walletManager.EstimateGas(ERC20DepositManager, gasPrice, zero, abi);
+					BigInteger gasFees = gas.Mul(gasPrice);
 					request.Debit(gastoken, userid, gasFees, false); //Debit gas token to pay for gas
 					walletManager.Unsafe_SafeSendEther(request.sqlCommandFactory, amount, ERC20DepositManager, gasPrice, gas, abi, userid, true, token, gasFees, gastoken);
 				}
@@ -1107,7 +1098,7 @@ namespace jessielesbian.OpenCEX{
 				ulong userid = request.GetUserID();
 				string token = request.ExtractRequestArg<string>("token");
 				string address = request.ExtractRequestArg<string>("address");
-				SafeUint amount = request.ExtractSafeUint("amount");
+				BigInteger amount = request.ExtractBigInteger("amount");
 				BlockchainManager blockchainManager;
 				switch (token)
 				{
@@ -1183,7 +1174,7 @@ namespace jessielesbian.OpenCEX{
 						throw new SafetyException("Unsupported token!");
 				}
 				WalletManager walletManager = blockchainManager.ExchangeWalletManager;
-				SafeUint gasPrice = walletManager.GetGasPrice();
+				BigInteger gasPrice = walletManager.GetGasPrice();
 				//Boost gas price to reduce server waiting time.
 				gasPrice = gasPrice.Add(gasPrice.Div(ten));
 				string tokenAddress;
@@ -1243,7 +1234,7 @@ namespace jessielesbian.OpenCEX{
 
 					//Estimate gas
 					CheckSafety(walletManager.EstimateGas(address, gasPrice, amount, "") == basegas, "Withdraw to contract not supported!");
-					SafeUint withfee = amount.Add(gasPrice.Mul(basegas));
+					BigInteger withfee = amount.Add(gasPrice.Mul(basegas));
 
 					request.Debit(token, userid, withfee, false);
 
@@ -1266,7 +1257,7 @@ namespace jessielesbian.OpenCEX{
 					string data = "0xa9059cbb" + ExpandABIAddress(address) + amount.ToHex(false, true);
 
 					//Estimate gas
-					SafeUint gas = walletManager.EstimateGas(tokenAddress, gasPrice, zero, data);
+					BigInteger gas = walletManager.EstimateGas(tokenAddress, gasPrice, zero, data);
 
 					//Debit unbacked gas fees
 					request.Debit(gastoken, userid, gasPrice.Mul(gas), false);
@@ -1587,17 +1578,17 @@ namespace jessielesbian.OpenCEX{
 			{
 				string pri;
 				string sec;
-				SafeUint amount0;
-				SafeUint amount1;
+				BigInteger amount0;
+				BigInteger amount1;
 				{
 					CheckSafety(request.args.TryGetValue("primary", out object temp), "Missing primary token!");
 					pri = (string)temp;
 					CheckSafety(request.args.TryGetValue("secondary", out temp), "Missing secondary token!");
 					sec = (string)temp;
 					CheckSafety(request.args.TryGetValue("amount0", out temp), "Missing primary amount!");
-					amount0 = GetSafeUint((string)temp);
+					amount0 = GetBigInteger((string)temp);
 					CheckSafety(request.args.TryGetValue("amount1", out temp), "Missing secondary amount!");
-					amount1 = GetSafeUint((string)temp);
+					amount1 = GetBigInteger((string)temp);
 				}
 				try
 				{
@@ -1609,12 +1600,12 @@ namespace jessielesbian.OpenCEX{
 				}
 				LPReserve lpreserve = new LPReserve(request.sqlCommandFactory, pri, sec);
 
-				if (!(lpreserve.reserve0.isZero || lpreserve.reserve1.isZero))
+				if (!(lpreserve.reserve0.IsZero || lpreserve.reserve1.IsZero))
 				{
-					SafeUint optimal1 = lpreserve.QuoteLP(amount0, true);
+					BigInteger optimal1 = lpreserve.QuoteLP(amount0, true);
 					if (optimal1 > amount1)
 					{
-						SafeUint optimal0 = lpreserve.QuoteLP(amount1, false);
+						BigInteger optimal0 = lpreserve.QuoteLP(amount1, false);
 						CheckSafety2(optimal0 > amount0, "Uniswap.NET: Insufficent primary amount (should not reach here)!", true);
 						amount0 = optimal0;
 					}
@@ -1644,16 +1635,16 @@ namespace jessielesbian.OpenCEX{
 
 			private readonly ulong userid;
 			private readonly string coin;
-			private readonly SafeUint refundIfFail;
+			private readonly BigInteger refundIfFail;
 			private readonly bool backed;
 
-			public PostWithdrawal(WalletManager walletManager1, string tx, ulong userid, string coin, SafeUint refundIfFail, bool b)
+			public PostWithdrawal(WalletManager walletManager1, string tx, ulong userid, string coin, BigInteger refundIfFail, bool b)
 			{
 				this.walletManager1 = walletManager1 ?? throw new ArgumentNullException(nameof(walletManager1));
 				this.tx = tx ?? throw new ArgumentNullException(nameof(tx));
 				this.userid = userid;
 				this.coin = coin ?? throw new ArgumentNullException(nameof(coin));
-				this.refundIfFail = refundIfFail ?? throw new ArgumentNullException(nameof(refundIfFail));
+				this.refundIfFail = refundIfFail;
 				backed = b;
 			}
 
@@ -1723,15 +1714,15 @@ namespace jessielesbian.OpenCEX{
 					"_PUT" => PutOption.instance,
 					_ => throw new SafetyException("Unknown derivative type!"),
 				};
-				SafeUint amount = request.ExtractSafeUint("amount");
+				BigInteger amount = request.ExtractBigInteger("amount");
 				MySqlCommand command = request.sqlCommandFactory.GetCommand("SELECT Strike FROM Derivatives WHERE Name = @coin FOR UPDATE;");
 				command.Parameters.AddWithValue("@coin", contract);
 				command.Prepare();
-				SafeUint strike;
+				BigInteger strike;
 				using (MySqlDataReader tmpreader2 = command.ExecuteReader())
 				{
 					CheckSafety(tmpreader2.Read(), "Missing derivatives record!");
-					strike = GetSafeUint(tmpreader2.GetString("Strike"));
+					strike = GetBigInteger(tmpreader2.GetString("Strike"));
 					tmpreader2.CheckSingletonResult();
 				}
 				request.Debit("Dai", userid, amount.Mul(derivativeType.CalculateMaxShortLoss(strike)).Div(ether), true);

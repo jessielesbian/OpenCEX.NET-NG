@@ -1,4 +1,4 @@
-using jessielesbian.OpenCEX.SafeMath;
+
 using MySql.Data.MySqlClient;
 using System;
 using System.Collections.Concurrent;
@@ -72,7 +72,7 @@ namespace jessielesbian.OpenCEX{
 				if (commit)
 				{
 					StaticUtils.CheckSafety2(dataReader, "Data reader still open!");
-					Queue<KeyValuePair<string, SafeUint>> pendingFlush;
+					Queue<KeyValuePair<string, BigInteger>> pendingFlush;
 					bool doflush2;
 					int limit3 = netBalanceEffects.Count;
 					if (limit3 == 0)
@@ -108,7 +108,7 @@ namespace jessielesbian.OpenCEX{
 							order = updates.ToArray();
 							limit3 = order.Length;
 						}
-						IDictionary<string, SafeUint> dirtyBalances = new Dictionary<string, SafeUint>(limit3);
+						IDictionary<string, BigInteger> dirtyBalances = new Dictionary<string, BigInteger>(limit3);
 						if (StaticUtils.ReplayBalanceUpdates)
 						{
 							while (replayedBalanceUpdates.TryDequeue(out ReplayedBalanceUpdate replayed))
@@ -117,12 +117,12 @@ namespace jessielesbian.OpenCEX{
 								int sign = replayed.shift.Sign;
 								if (sign > 0)
 								{
-									CreditOrDebit(replayed.key[(pivot + 1)..], Convert.ToUInt64(replayed.key.Substring(0, pivot)), new SafeUint(replayed.shift), true, dirtyBalances);
+									CreditOrDebit(replayed.key[(pivot + 1)..], Convert.ToUInt64(replayed.key.Substring(0, pivot)), replayed.shift, true, dirtyBalances);
 								}
 								else if (sign < 0)
 								{
 									try{
-										CreditOrDebit(replayed.key[(pivot + 1)..], Convert.ToUInt64(replayed.key.Substring(0, pivot)), new SafeUint(replayed.shift * BigInteger.MinusOne), false, dirtyBalances);
+										CreditOrDebit(replayed.key[(pivot + 1)..], Convert.ToUInt64(replayed.key.Substring(0, pivot)), replayed.shift * BigInteger.MinusOne, false, dirtyBalances);
 									} catch{
 										Console.Error.WriteLine("Error while replaying debit: " + replayed.failure);
 										throw;
@@ -139,11 +139,11 @@ namespace jessielesbian.OpenCEX{
 								int sign = bigInteger.Sign;
 								if (sign > 0)
 								{
-									CreditOrDebit(key[(pivot + 1)..], Convert.ToUInt64(key.Substring(0, pivot)), new SafeUint(bigInteger), true, dirtyBalances);
+									CreditOrDebit(key[(pivot + 1)..], Convert.ToUInt64(key.Substring(0, pivot)), bigInteger, true, dirtyBalances);
 								}
 								else if (sign < 0)
 								{
-									CreditOrDebit(key[(pivot + 1)..], Convert.ToUInt64(key.Substring(0, pivot)), new SafeUint(bigInteger * BigInteger.MinusOne), false, dirtyBalances);
+									CreditOrDebit(key[(pivot + 1)..], Convert.ToUInt64(key.Substring(0, pivot)), bigInteger * BigInteger.MinusOne, false, dirtyBalances);
 								}
 							}
 						}
@@ -151,9 +151,9 @@ namespace jessielesbian.OpenCEX{
 
 						netBalanceEffects.Clear();
 
-						pendingFlush = new Queue<KeyValuePair<string, SafeUint>>();
+						pendingFlush = new Queue<KeyValuePair<string, BigInteger>>();
 						
-						foreach (KeyValuePair<string, SafeUint> balanceUpdate in dirtyBalances)
+						foreach (KeyValuePair<string, BigInteger> balanceUpdate in dirtyBalances)
 						{
 							//Flush dirty balances
 							string key = balanceUpdate.Key;
@@ -201,7 +201,7 @@ namespace jessielesbian.OpenCEX{
 						postCommit = null;
 					}
 					if(doflush2 && (!StaticUtils.Multiserver)){
-						while (pendingFlush.TryDequeue(out KeyValuePair<string, SafeUint> result))
+						while (pendingFlush.TryDequeue(out KeyValuePair<string, BigInteger> result))
 						{
 							try{
 								L3BalancesCache2.UpdateOrAdd(result.Key, result.Value);
@@ -309,7 +309,7 @@ namespace jessielesbian.OpenCEX{
 
 		private readonly Dictionary<string, BigInteger> netBalanceEffects = new Dictionary<string, BigInteger>();
 		private readonly Dictionary<string, string> OriginalBalances = new Dictionary<string, string>();
-		private static readonly ConcurrentDualGenerationCache<string, SafeUint> L3BalancesCache2 = new ConcurrentDualGenerationCache<string, SafeUint>(StaticUtils.MaximumBalanceCacheSize);
+		private static readonly ConcurrentDualGenerationCache<string, BigInteger> L3BalancesCache2 = new ConcurrentDualGenerationCache<string, BigInteger>(StaticUtils.MaximumBalanceCacheSize);
 		private readonly Queue<string> pendingLockRelease = new Queue<string>();
 		
 		//Certain assets should not be balances cached, because they are used with derivatives trading
@@ -318,7 +318,7 @@ namespace jessielesbian.OpenCEX{
 		/// <summary>
 		/// Should not be called directly
 		/// </summary>
-		public SafeUint GetBalance(string coin, ulong userid){
+		public BigInteger GetBalance(string coin, ulong userid){
 			string key = userid + "_" + coin;
 			if (StaticUtils.Multiserver || noBC.Contains(coin))
 			{
@@ -333,7 +333,7 @@ namespace jessielesbian.OpenCEX{
 					pendingLockRelease.Enqueue(key);
 				}
 				
-				SafeUint balance = L3BalancesCache2.GetOrAdd(key, FetchBalanceIMPL, out bool called);
+				BigInteger balance = L3BalancesCache2.GetOrAdd(key, FetchBalanceIMPL, out bool called);
 				if(!called)
 				{
 					StaticUtils.CheckSafety(OriginalBalances.TryAdd(key, balance.ToString()), "Unable to register balances caching safety check (should not reach here)!", true);
@@ -342,17 +342,17 @@ namespace jessielesbian.OpenCEX{
 			}
 		}
 
-		private SafeUint FetchBalanceIMPL(string key){
+		private BigInteger FetchBalanceIMPL(string key){
 			int pivot = key.IndexOf('_');
 
 			//Fetch balance from database
 			readBalance.Parameters["@userid"].Value = Convert.ToUInt64(key.Substring(0, pivot));
 			readBalance.Parameters["@coin"].Value = key[(pivot + 1)..];
 			MySqlDataReader reader = SafeExecuteReader(readBalance);
-			SafeUint balance;
+			BigInteger balance;
 			if (reader.HasRows)
 			{
-				balance = StaticUtils.GetSafeUint(reader.GetString("Balance"));
+				balance = StaticUtils.GetBigInteger(reader.GetString("Balance"));
 				reader.CheckSingletonResult();
 				StaticUtils.CheckSafety(OriginalBalances.TryAdd(key, balance.ToString()), "Unable to register balances caching safety check (should not reach here)!", true);
 			}
@@ -365,9 +365,9 @@ namespace jessielesbian.OpenCEX{
 			return balance;
 		}
 
-		private void CreditOrDebit(string coin, ulong userid, SafeUint amount, bool credit, IDictionary<string, SafeUint> dirtyBalances)
+		private void CreditOrDebit(string coin, ulong userid, BigInteger amount, bool credit, IDictionary<string, BigInteger> dirtyBalances)
 		{
-			SafeUint balance = GetBalance(coin, userid);
+			BigInteger balance = GetBalance(coin, userid);
 			if (credit)
 			{
 				balance = balance.Add(amount);
@@ -421,30 +421,30 @@ namespace jessielesbian.OpenCEX{
 		/// Credit funds to a customer account.
 		/// </summary>
 		[MethodImpl(MethodImplOptions.AggressiveInlining)]
-		public void Credit(string coin, ulong userid, SafeUint amount, bool safe)
+		public void Credit(string coin, ulong userid, BigInteger amount, bool safe)
 		{
 			StaticUtils.CheckSafety2(userid == 0, "Unexpected credit to null account!");
 			if (safe)
 			{
 				//Shortfall protection: debit funds from null account
-				ShiftBalance("0_" + coin, BigInteger.Negate(amount.bigInteger));
+				ShiftBalance("0_" + coin, BigInteger.Negate(amount));
 			}
-			ShiftBalance(userid.ToString() + '_' + coin, amount.bigInteger);
+			ShiftBalance(userid.ToString() + '_' + coin, amount);
 		}
 
 		/// <summary>
 		/// Debit funds from a customer account.
 		/// </summary>
 		[MethodImpl(MethodImplOptions.AggressiveInlining)]
-		public void Debit(string coin, ulong userid, SafeUint amount, bool safe)
+		public void Debit(string coin, ulong userid, BigInteger amount, bool safe)
 		{
 			StaticUtils.CheckSafety2(userid == 0, "Unexpected debit from null account!");
 			if (safe)
 			{
 				//Shortfall protection: debit funds from null account
-				ShiftBalance("0_" + coin, amount.bigInteger);
+				ShiftBalance("0_" + coin, amount);
 			}
-			ShiftBalance(userid.ToString() + '_' + coin, BigInteger.Negate(amount.bigInteger));
+			ShiftBalance(userid.ToString() + '_' + coin, BigInteger.Negate(amount));
 		}
 
 		~SQLCommandFactory()

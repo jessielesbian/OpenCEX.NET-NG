@@ -1,4 +1,4 @@
-using jessielesbian.OpenCEX.SafeMath;
+
 using System.Numerics;
 using System.Collections;
 using System.Linq;
@@ -10,22 +10,22 @@ using System.Runtime.CompilerServices;
 namespace jessielesbian.OpenCEX
 {
 	public static partial class StaticUtils{
-		public static readonly SafeUint day = new SafeUint(new BigInteger(86400));
-		public static readonly SafeUint basegas = new SafeUint(new BigInteger(21000));
-		public static readonly SafeUint basegas2 = new SafeUint(new BigInteger(1000000));
-		public static readonly SafeUint e16 = new SafeUint(new BigInteger(65536));
-		public static readonly SafeUint ten = new SafeUint(new BigInteger(10));
-		public static readonly SafeUint ether = GetSafeUint("1000000000000000000");
-		public static readonly SafeUint zero = new SafeUint(BigInteger.Zero);
-		public static readonly SafeUint one = new SafeUint(BigInteger.One);
-		public static readonly SafeUint two = new SafeUint(new BigInteger(2));
-		public static readonly SafeUint three = new SafeUint(new BigInteger(3));
-		public static readonly SafeUint thousand = new SafeUint(new BigInteger(1000));
-		public static readonly SafeUint afterfees = new SafeUint(new BigInteger(997));
-		public static readonly SafeUint afterether = GetSafeUint("997000000000000000000");
+		public static readonly BigInteger day = new BigInteger(86400);
+		public static readonly BigInteger basegas = new BigInteger(21000);
+		public static readonly BigInteger basegas2 = new BigInteger(1000000);
+		public static readonly BigInteger e16 = new BigInteger(65536);
+		public static readonly BigInteger ten = new BigInteger(10);
+		public static readonly BigInteger ether = GetBigInteger("1000000000000000000");
+		public static readonly BigInteger zero = BigInteger.Zero;
+		public static readonly BigInteger one = BigInteger.One;
+		public static readonly BigInteger two = new BigInteger(2);
+		public static readonly BigInteger three = new BigInteger(3);
+		public static readonly BigInteger thousand = new BigInteger(1000);
+		public static readonly BigInteger afterfees = new BigInteger(997);
+		public static readonly BigInteger afterether = GetBigInteger("997000000000000000000");
 
 		[MethodImpl(MethodImplOptions.AggressiveInlining)]
-		public static SafeUint GetSafeUint(string number){
+		public static BigInteger GetBigInteger(string number){
 			if (number.StartsWith("0x"))
 			{
 				number = number[2..];
@@ -35,106 +35,116 @@ namespace jessielesbian.OpenCEX
 				if(number.Length % 2 == 1){
 					number = '0' + number;
 				}
-				return new SafeUint(BigInteger.Parse(number, NumberStyles.AllowHexSpecifier));
+				return BigInteger.Parse(number, NumberStyles.AllowHexSpecifier);
 			}
 			else{
-				return new SafeUint(BigInteger.Parse(number, NumberStyles.None));
+				return BigInteger.Parse(number, NumberStyles.None);
 			}
 		}
 
 		[MethodImpl(MethodImplOptions.AggressiveInlining)]
-		public static string SafeSerializeSafeUint(SafeUint stuff){
-			if(stuff is null){
-				return null;
-			} else{
-				return stuff.ToString();
-			}
+		public static string SafeSerializeBigInteger(BigInteger stuff){
+			return stuff.ToString();
 		}
 
 		[MethodImpl(MethodImplOptions.AggressiveInlining)]
-		public static SafeUint ExtractSafeUint(this RequestManager.Request request, string key)
+		public static BigInteger ExtractBigInteger(this RequestManager.Request request, string key)
 		{
 			string temp = request.ExtractRequestArg<string>(key);
 			string postfix = key + '!';
 			CheckSafety2(temp.Length == 0, "Zero-length number for request argument: " + postfix);
 			CheckSafety2(temp[0] == '-', "Negative number for request argument: " + postfix);
 			try{
-				return GetSafeUint(temp);
+				return GetBigInteger(temp);
 			} catch{
 				throw new SafetyException("Invalid number for request argument: " + postfix);
 			}
 		}
-	}
-}
 
-namespace jessielesbian.OpenCEX.SafeMath{
-	public sealed class SafeUint{
-		public readonly BigInteger bigInteger;
-		public readonly bool isZero;
-		public readonly bool isOne;
-
+		//Extend big-integs
 		[MethodImpl(MethodImplOptions.AggressiveInlining)]
-		public SafeUint(BigInteger bigInteger, string msg = "SafeMath: Negative unsigned big integer!", bool critical = false)
+		public static string ToHex(this BigInteger bn,bool prefix = true, bool pad256 = true)
 		{
-			StaticUtils.CheckSafety2(bigInteger.Sign < 0, msg, critical);
-			this.bigInteger = bigInteger;
-			isZero = bigInteger.IsZero;
-			isOne = bigInteger.IsOne;
-		}
+			CheckSafety2(bn < 0, "SafeMath: Unexpected negative numbers (should not reach here)!", true);
+			string postfix = new HexBigInteger(bn).HexValue.ToLower()[2..];
+			if (pad256)
+			{
+				CheckSafety2(postfix.Length > 64, "256-bit integer overflow!");
+				postfix = postfix.PadLeft(64, '0');
+			}
+			else
+			{
+				while (postfix.StartsWith('0'))
+				{
+					postfix = postfix[1..];
+				}
+				if (postfix == string.Empty)
+				{
+					postfix = "0";
+				}
+			}
 
-		[MethodImpl(MethodImplOptions.AggressiveInlining)]
-		public SafeUint Add(SafeUint other){
-			return new SafeUint(bigInteger + other.bigInteger, "SafeMath: Unreachable Add Error (should not reach here)!", true);
-		}
-
-		[MethodImpl(MethodImplOptions.AggressiveInlining)]
-		public SafeUint Sub(SafeUint other)
-		{
-			return new SafeUint(bigInteger - other.bigInteger, "SafeMath: Unexpected subtraction overflow (should not reach here)!", true);
-		}
-		[MethodImpl(MethodImplOptions.AggressiveInlining)]
-		public SafeUint Sub(SafeUint other, string msg, bool critical)
-		{
-			return new SafeUint(bigInteger - other.bigInteger, msg, critical);
-		}
-
-		[MethodImpl(MethodImplOptions.AggressiveInlining)]
-		public SafeUint Mul(SafeUint other)
-		{
-			return new SafeUint(bigInteger * other.bigInteger, "SafeMath: Unreachable Multiply Error (should not reach here)!", true);
-		}
-
-		[MethodImpl(MethodImplOptions.AggressiveInlining)]
-		public SafeUint Div(SafeUint other)
-		{
-			StaticUtils.CheckSafety2(other.isZero, "Unexpected division by zero (should not reach here)!", true);
-			BigInteger b = bigInteger / other.bigInteger;
-			return new SafeUint(b, "SafeMath: Unreachable Divide Error (should not reach here)!", true);
-		}
-
-		[MethodImpl(MethodImplOptions.AggressiveInlining)]
-		public SafeUint Mod(SafeUint other, string msg = "SafeMath: Modulo by zero!")
-		{
-			StaticUtils.CheckSafety2(other.isZero, msg);
-			BigInteger b = bigInteger % other.bigInteger;
-			return new SafeUint(b, "SafeMath: Unreachable Modulo Error (should not reach here)!", true);
-		}
-
-		[MethodImpl(MethodImplOptions.AggressiveInlining)]
-		public SafeUint Max(SafeUint other){
-			if(bigInteger > other.bigInteger){
-				return this;
-			} else{
-				return other;
+			if (prefix)
+			{
+				return "0x" + postfix;
+			}
+			else
+			{
+				return postfix;
 			}
 		}
 
 		[MethodImpl(MethodImplOptions.AggressiveInlining)]
-		public SafeUint Min(SafeUint other)
+		public static BigInteger Sub(this BigInteger bigInteger, BigInteger other)
 		{
-			if (bigInteger < other.bigInteger)
+			CheckSafety2(bigInteger < 0 && other < 0, "SafeMath: Unexpected negative numbers (should not reach here)!", true);
+			other = bigInteger - other;
+			CheckSafety2(bigInteger < BigInteger.Zero, "SafeMath: Subtraction Overflow (should not reach here)!", true);
+			return other;
+		}
+		[MethodImpl(MethodImplOptions.AggressiveInlining)]
+		public static BigInteger Sub(this BigInteger bigInteger, BigInteger other, string msg, bool critical)
+		{
+			CheckSafety2(bigInteger < 0 && other < 0, "SafeMath: Unexpected negative numbers (should not reach here)!", true);
+			other = bigInteger - other;
+			CheckSafety2(bigInteger < BigInteger.Zero, msg, critical);
+			return other;
+		}
+
+		[MethodImpl(MethodImplOptions.AggressiveInlining)]
+		public static BigInteger Div(this BigInteger bigInteger, BigInteger other)
+		{
+			CheckSafety2(bigInteger < 0 && other < 0, "SafeMath: Unexpected negative numbers (should not reach here)!", true);
+			CheckSafety2(other.IsZero, "SafeMath: Unexpected division by zero (should not reach here)!", true);
+			return bigInteger / other;
+		}
+
+		[MethodImpl(MethodImplOptions.AggressiveInlining)]
+		public static BigInteger Mod(this BigInteger bigInteger, BigInteger other)
+		{
+			CheckSafety2(bigInteger < 0 && other < 0, "SafeMath: Unexpected negative numbers (should not reach here)!", true);
+			CheckSafety2(other.IsZero, "SafeMath: Unexpected modulo by zero (should not reach here)!", true);
+			return bigInteger / other;
+		}
+		[MethodImpl(MethodImplOptions.AggressiveInlining)]
+		public static BigInteger Mul(this BigInteger bigInteger, BigInteger other)
+		{
+			CheckSafety2(bigInteger < 0 && other < 0, "SafeMath: Unexpected negative numbers (should not reach here)!", true);
+			return bigInteger * other;
+		}
+		public static BigInteger Add(this BigInteger bigInteger, BigInteger other)
+		{
+			CheckSafety2(bigInteger < 0 && other < 0, "SafeMath: Unexpected negative numbers (should not reach here)!", true);
+			return bigInteger + other;
+		}
+
+		[MethodImpl(MethodImplOptions.AggressiveInlining)]
+		public static BigInteger Max(this BigInteger bigInteger, BigInteger other)
+		{
+			CheckSafety2(bigInteger < 0 && other < 0, "SafeMath: Unexpected negative numbers (should not reach here)!", true);
+			if (bigInteger > other)
 			{
-				return this;
+				return bigInteger;
 			}
 			else
 			{
@@ -143,81 +153,17 @@ namespace jessielesbian.OpenCEX.SafeMath{
 		}
 
 		[MethodImpl(MethodImplOptions.AggressiveInlining)]
-		public static bool operator >(SafeUint x, SafeUint y)
+		public static BigInteger Min(this BigInteger bigInteger, BigInteger other)
 		{
-			return x.bigInteger > y.bigInteger;
-		}
-
-		[MethodImpl(MethodImplOptions.AggressiveInlining)]
-		public static bool operator <(SafeUint x, SafeUint y)
-		{
-			return x.bigInteger < y.bigInteger;
-		}
-
-		[MethodImpl(MethodImplOptions.AggressiveInlining)]
-		public static bool operator ==(SafeUint x, SafeUint y)
-		{
-			if(x is null && y is null){
-				return true;
-			} else if(x is null){
-				return false;
-			} else if(y is null){
-				return false;
-			} else{
-				return x.bigInteger == y.bigInteger;
-			}
-			
-		}
-
-		[MethodImpl(MethodImplOptions.AggressiveInlining)]
-		public static bool operator !=(SafeUint x, SafeUint y)
-		{
-			return !(x == y);
-		}
-
-		[MethodImpl(MethodImplOptions.AggressiveInlining)]
-		public override bool Equals(object obj)
-		{
-			if(obj is SafeUint safeUint){
-				return bigInteger == safeUint.bigInteger;
-			} else{
-				return false;
-			}
-		}
-
-		[MethodImpl(MethodImplOptions.AggressiveInlining)]
-		public override string ToString()
-		{
-			return bigInteger.ToString();
-		}
-
-		[MethodImpl(MethodImplOptions.AggressiveInlining)]
-		public override int GetHashCode()
-		{
-			return bigInteger.GetHashCode();
-		}
-
-		public string ToHex(bool prefix = true, bool pad256 = true){
-			string postfix = new HexBigInteger(bigInteger).HexValue.ToLower()[2..];
-			if(pad256)
+			CheckSafety2(bigInteger < 0 && other < 0, "SafeMath: Unexpected negative numbers (should not reach here)!", true);
+			if (bigInteger > other)
 			{
-				StaticUtils.CheckSafety2(postfix.Length > 64, "256-bit integer overflow!");
-				postfix = postfix.PadLeft(64, '0');
-			} else{
-				while(postfix.StartsWith('0')){
-					postfix = postfix[1..];
-				}
-				if (postfix == string.Empty){
-					postfix = "0";
-				}
+				return other;
 			}
-			
-			if (prefix){
-				return "0x" + postfix;
-			} else{
-				return postfix;
+			else
+			{
+				return bigInteger;
 			}
-			
 		}
 	}
 }

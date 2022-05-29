@@ -1,5 +1,5 @@
 using System;
-using jessielesbian.OpenCEX.SafeMath;
+
 using System.Collections.Generic;
 using Newtonsoft.Json;
 using System.Net.Http;
@@ -8,12 +8,13 @@ using Newtonsoft.Json.Linq;
 using jessielesbian.OpenCEX.oracle;
 using System.Threading;
 using System.Collections.Concurrent;
+using System.Numerics;
 
 namespace jessielesbian.OpenCEX
 {
 	namespace oracle{
 		public interface IOracle{
-			public SafeUint GetPriceAt(ulong time, ulong tolerance);
+			public BigInteger GetPriceAt(ulong time, ulong tolerance);
 			public void Flush();
 		}
 		public sealed class OracleFlushingJob : ConcurrentJob{
@@ -51,8 +52,8 @@ namespace jessielesbian.OpenCEX
 #pragma warning restore CS0649
 			}
 			private readonly Uri apicall;
-			private readonly IDictionary<ulong, SafeUint> CachedPrices = new Dictionary<ulong, SafeUint>();
-			private readonly ConcurrentDictionary<ulong, SafeUint> CachedPrices2 = new ConcurrentDictionary<ulong, SafeUint>();
+			private readonly IDictionary<ulong, BigInteger> CachedPrices = new Dictionary<ulong, BigInteger>();
+			private readonly ConcurrentDictionary<ulong, BigInteger> CachedPrices2 = new ConcurrentDictionary<ulong, BigInteger>();
 			private readonly object locker = new object();
 			private readonly HttpClient httpClient = new HttpClient();
 			private readonly int length;
@@ -115,21 +116,21 @@ namespace jessielesbian.OpenCEX
 							work += filler;
 						}
 
-						StaticUtils.CheckSafety(CachedPrices.TryAdd(time, StaticUtils.GetSafeUint(work)), "Unable to update CoinMarketCap price cache!");
+						StaticUtils.CheckSafety(CachedPrices.TryAdd(time, StaticUtils.GetBigInteger(work)), "Unable to update CoinMarketCap price cache!");
 					}
 				}
 			}
 
-			public SafeUint GetPriceAt(ulong time, ulong tolerance)
+			public BigInteger GetPriceAt(ulong time, ulong tolerance)
 			{
 				StaticUtils.CheckSafety2(StaticUtils.Multiserver, "This oracle is not multiserver-safe!");
 				
 				return CachedPrices2.GetOrAdd(time, (ulong _) => {
 					ulong lastDist = ulong.MaxValue;
-					SafeUint ret = null;
+					BigInteger ret = BigInteger.MinusOne;
 					lock (locker)
 					{	
-						foreach (KeyValuePair<ulong, SafeUint> keyValuePair in CachedPrices)
+						foreach (KeyValuePair<ulong, BigInteger> keyValuePair in CachedPrices)
 						{
 							if (time >= keyValuePair.Key)
 							{

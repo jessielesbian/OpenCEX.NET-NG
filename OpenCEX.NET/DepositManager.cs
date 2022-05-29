@@ -178,7 +178,7 @@ namespace jessielesbian.OpenCEX{
 				}
 				if(!(transaction is null)){
 					if(!(transaction.blockNumber is null)){
-						if(safeheight > Convert.ToUInt64(GetSafeUint(Convert.ToString(transaction.blockNumber)).ToString()))
+						if(safeheight > Convert.ToUInt64(GetBigInteger(Convert.ToString(transaction.blockNumber)).ToString()))
 						{
 							SQLCommandFactory sqlCommandFactory = GetSQL(IsolationLevel.RepeatableRead);
 							Exception deferred = null;
@@ -191,10 +191,10 @@ namespace jessielesbian.OpenCEX{
 								}
 								
 								sqlCommandFactory.SafeExecuteNonQuery("DELETE FROM WorkerTasks WHERE Id = " + id + ";");
-								if (GetSafeUint(Convert.ToString(transaction.status)) == one)
+								if (GetBigInteger(Convert.ToString(transaction.status)) == one)
 								{
 									//UNSAFE credit, since we are adding newly-deposited funds
-									sqlCommandFactory.Credit(url3, userid, GetSafeUint(misc[1]), backed);
+									sqlCommandFactory.Credit(url3, userid, GetBigInteger(misc[1]), backed);
 								}
 								sqlCommandFactory.DestroyTransaction(true, true);
 							}

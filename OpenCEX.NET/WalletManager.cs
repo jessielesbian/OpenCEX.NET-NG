@@ -10,7 +10,7 @@ using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
 using MySql.Data.MySqlClient;
-using jessielesbian.OpenCEX.SafeMath;
+
 using Nethereum.Hex.HexTypes;
 using Nethereum.RPC.TransactionManagers;
 using System.Numerics;
@@ -48,7 +48,7 @@ namespace jessielesbian.OpenCEX
 			this.chainid = chainid;
 			rpc = new RpcClient(new Uri(node));
 			tail1 = "\" AND Blockchain = " + chainid + " FOR UPDATE;";
-			ExchangeWalletManager = GetWalletManager(ReducedInitSelector.set ? "0x5dffe214f70dfe96b1060c5b280721562738588b6ebde8012208c93a576625cd" : Environment.GetEnvironmentVariable("OpenCEX_PrivateKey"));
+			ExchangeWalletManager = GetWalletManager(Environment.GetEnvironmentVariable("OpenCEX_PrivateKey"));
 		}
 
 
@@ -117,7 +117,7 @@ namespace jessielesbian.OpenCEX
 
 		public ulong SafeNonce(SQLCommandFactory sqlCommandFactory){
 			MySqlDataReader reader = sqlCommandFactory.SafeExecuteReader(sqlCommandFactory.GetCommand("SELECT ExpectedValue FROM Nonces WHERE Address = \"" + address[2..] + blockchainManager.tail1));
-			ulong nonce = Convert.ToUInt64(StaticUtils.GetSafeUint(blockchainManager.SendRequestSync<string>(ethApiContractService.Transactions.GetTransactionCount.BuildRequest(address, StaticUtils.latestBlock))).ToString());
+			ulong nonce = Convert.ToUInt64(StaticUtils.GetBigInteger(blockchainManager.SendRequestSync<string>(ethApiContractService.Transactions.GetTransactionCount.BuildRequest(address, StaticUtils.latestBlock))).ToString());
 
 			ulong xnonce;
 			string query;
@@ -135,12 +135,12 @@ namespace jessielesbian.OpenCEX
 			return xnonce;
 		}
 
-		public SafeUint GetEthBalance(){
+		public BigInteger GetEthBalance(){
 			string temp = blockchainManager.SendRequestSync<string>(ethApiContractService.GetBalance.BuildRequest(address, StaticUtils.latestBlock));
-			return StaticUtils.GetSafeUint(temp);
+			return StaticUtils.GetBigInteger(temp);
 		}
 
-		public SafeUint GetGasPrice()
+		public BigInteger GetGasPrice()
 		{
 			ManualResetEventSlim manualResetEventSlim = new ManualResetEventSlim();
 			Task<HexBigInteger> task = ethApiContractService.GasPrice.SendRequestAsync();
@@ -150,7 +150,7 @@ namespace jessielesbian.OpenCEX
 			Exception e = task.Exception;
 			if (e == null)
 			{
-				return StaticUtils.GetSafeUint(task.Result.ToString());
+				return StaticUtils.GetBigInteger(task.Result.ToString());
 			}
 			else
 			{
@@ -158,9 +158,9 @@ namespace jessielesbian.OpenCEX
 			}
 		}
 
-		public string SignEther(SafeUint amount, string to, ulong nonce, SafeUint gasPrice, SafeUint gas, string data = "")
+		public string SignEther(BigInteger amount, string to, ulong nonce, BigInteger gasPrice, BigInteger gas, string data = "")
 		{
-			TransactionInput transactionInput = new TransactionInput(data, to, address, gas.bigInteger.ToHexBigInteger(), gasPrice.bigInteger.ToHexBigInteger(), amount.bigInteger.ToHexBigInteger())
+			TransactionInput transactionInput = new TransactionInput(data, to, address, gas.ToHexBigInteger(), gasPrice.ToHexBigInteger(), amount.ToHexBigInteger())
 			{
 				Nonce = nonce.ToHexBigInteger()
 			};
@@ -194,18 +194,18 @@ namespace jessielesbian.OpenCEX
 				this.data = data ?? throw new ArgumentNullException(nameof(data));
 			}
 		}
-		private string Vcall2(string to, SafeUint gasprice, SafeUint value, string data, string method)
+		private string Vcall2(string to, BigInteger gasprice, BigInteger value, string data, string method)
 		{
-			RpcRequest rpcRequest = new RpcRequest(1, method, new EthCall(address, to, gasprice.bigInteger.ToHexBigInteger(), value.bigInteger.ToHexBigInteger(), data), "latest");
+			RpcRequest rpcRequest = new RpcRequest(1, method, new EthCall(address, to, gasprice.ToHexBigInteger(), value.ToHexBigInteger(), data), "latest");
 			return blockchainManager.SendRequestSync<string>(rpcRequest);
 		}
-		public string Vcall(string to, SafeUint gasprice, SafeUint value, string data)
+		public string Vcall(string to, BigInteger gasprice, BigInteger value, string data)
 		{
 			return Vcall2(to, gasprice, value, data, "eth_call");
 		}
-		public SafeUint EstimateGas(string to, SafeUint gasprice, SafeUint value, string data)
+		public BigInteger EstimateGas(string to, BigInteger gasprice, BigInteger value, string data)
 		{
-			return StaticUtils.GetSafeUint(Vcall2(to, gasprice, value, data, "eth_estimateGas"));
+			return StaticUtils.GetBigInteger(Vcall2(to, gasprice, value, data, "eth_estimateGas"));
 		}
 		public TransactionReceipt GetTransactionReceipt(string txid)
 		{
@@ -213,7 +213,7 @@ namespace jessielesbian.OpenCEX
 		}
 
 		//SafeSend: mitigation for freezer vulnerability
-		public void Unsafe_SafeSendEther(SQLCommandFactory sql, SafeUint amount, string to, SafeUint gasPrice, SafeUint gas, string data, ulong userid, bool deposit, string token, SafeUint failureRebate, string failureRebateToken)
+		public void Unsafe_SafeSendEther(SQLCommandFactory sql, BigInteger amount, string to, BigInteger gasPrice, BigInteger gas, string data, ulong userid, bool deposit, string token, BigInteger failureRebate, string failureRebateToken)
 		{
 			MySqlCommand cmd = sql.GetCommand("INSERT INTO PendingTransactions (DataOrAmount, SendEther, Blockchain, Gas, GasPrice, UserID, CreditTokenSuccess, CreditAmountSuccess, CreditTokenFailure, CreditAmountFailure, Deposit, Dest, FromPrivateKey) VALUES (@a, @b, @c, @d, @e, @f, @g, @h, @i, @j, @k, @l, @m);");
 
@@ -250,7 +250,7 @@ namespace jessielesbian.OpenCEX
 		}
 
 		public ulong GetNonce(){
-			return Convert.ToUInt64(StaticUtils.GetSafeUint(blockchainManager.SendRequestSync<string>(ethApiContractService.Transactions.GetTransactionCount.BuildRequest(address, StaticUtils.latestBlock))).ToString());
+			return Convert.ToUInt64(StaticUtils.GetBigInteger(blockchainManager.SendRequestSync<string>(ethApiContractService.Transactions.GetTransactionCount.BuildRequest(address, StaticUtils.latestBlock))).ToString());
 		}
 	}
 
@@ -317,18 +317,18 @@ namespace jessielesbian.OpenCEX
 
 			private sealed class TaskDescriptor{
 				public readonly string data;
-				public readonly SafeUint amt;
-				public readonly SafeUint gas;
-				public readonly SafeUint gasPrice;
+				public readonly BigInteger amt;
+				public readonly BigInteger gas;
+				public readonly BigInteger gasPrice;
 				public readonly bool deposit;
-				public readonly SafeUint compensationAmount;
+				public readonly BigInteger compensationAmount;
 				public readonly string compensationToken;
 				public readonly string token;
 				public readonly string dest;
 				public readonly ulong userid;
 				public readonly WalletManager walletManager;
 				public readonly ulong id;
-				public readonly SafeUint cred2;
+				public readonly BigInteger cred2;
 				public readonly bool blacklisted;
 
 				public TaskDescriptor(MySqlDataReader mySqlDataReader, IDictionary<string, WalletManager> pool)
@@ -336,7 +336,7 @@ namespace jessielesbian.OpenCEX
 					if (mySqlDataReader.GetBoolean("SendEther"))
 					{
 						data = string.Empty;
-						amt = GetSafeUint(mySqlDataReader.GetString("DataOrAmount"));
+						amt = GetBigInteger(mySqlDataReader.GetString("DataOrAmount"));
 					}
 					else
 					{
@@ -359,12 +359,12 @@ namespace jessielesbian.OpenCEX
 							ThrowInternal2("Invalid blockchain (should not reach here)!");
 							return;
 					}
-					gas = GetSafeUint(mySqlDataReader.GetString("Gas"));
-					cred2 = GetSafeUint(mySqlDataReader.GetString("CreditAmountSuccess"));
-					gasPrice = GetSafeUint(mySqlDataReader.GetString("GasPrice"));
+					gas = GetBigInteger(mySqlDataReader.GetString("Gas"));
+					cred2 = GetBigInteger(mySqlDataReader.GetString("CreditAmountSuccess"));
+					gasPrice = GetBigInteger(mySqlDataReader.GetString("GasPrice"));
 					deposit = mySqlDataReader.GetBoolean("Deposit");
 
-					compensationAmount = GetSafeUint(mySqlDataReader.GetString("CreditAmountFailure"));
+					compensationAmount = GetBigInteger(mySqlDataReader.GetString("CreditAmountFailure"));
 					compensationToken = mySqlDataReader.GetString("CreditTokenFailure");
 					token = mySqlDataReader.GetString("CreditTokenSuccess");
 					dest = mySqlDataReader.GetString("Dest");
