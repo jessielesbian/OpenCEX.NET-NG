@@ -1763,12 +1763,11 @@ namespace jessielesbian.OpenCEX{
 			{
 				MySqlCommand cmd = request.sqlCommandFactory.GetCommand("SELECT Expiry, Strike FROM Derivatives WHERE Name = @name;");
 				cmd.Parameters.AddWithValue("@name", request.ExtractRequestArg<string>("contract"));
-				using(MySqlDataReader reader = cmd.ExecuteReader()){
-					CheckSafety(reader.Read(), "Invalid derivatives!");
-					object tmp = new object[] {reader.GetUInt64("Expiry"), reader.GetString("Strike")};
-					CheckSafety2(reader.Read(), "Duplicate derivatives records!");
-					return tmp;
-				}
+				using MySqlDataReader reader = cmd.ExecuteReader();
+				CheckSafety(reader.Read(), "Invalid derivatives!");
+				object tmp = new object[] { reader.GetUInt64("Expiry"), reader.GetString("Strike") };
+				CheckSafety2(reader.Read(), "Duplicate derivatives records!");
+				return tmp;
 			}
 
 			protected override bool NeedRedis()

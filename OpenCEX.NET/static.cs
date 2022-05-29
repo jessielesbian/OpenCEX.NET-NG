@@ -57,10 +57,10 @@ namespace jessielesbian.OpenCEX{
 				
 			}
 		}
-
+		private int noexec = 0;
 		public void Execute(){
 			try{
-				StaticUtils.CheckSafety2(sync.IsSet, "Job already executed!");
+				StaticUtils.CheckSafety2(Interlocked.Exchange(ref noexec, 1) == 1, "Job already executed!");
 				returns = ExecuteIMPL();
 			} catch(Exception e){
 				exception = e;
@@ -68,7 +68,28 @@ namespace jessielesbian.OpenCEX{
 				sync.Set();
 			}
 		}
+		public Task<object> ExecuteAsTask(){
+			StaticUtils.CheckSafety2(Interlocked.Exchange(ref noexec, 1) == 1, "Job already executed!");
+			Task<object> ret = new Task<object>(ExecuteIMPL);
+			ret.Start();
+			ApplyCompletionResult(ret);
+			return ret;
+		}
 		protected abstract object ExecuteIMPL();
+		private async void ApplyCompletionResult(Task<object> tsk){
+			try
+			{
+				returns = await tsk;
+			}
+			catch (Exception e)
+			{
+				exception = e;
+			}
+			finally
+			{
+				sync.Set();
+			}
+		}
 	}
 
 	public static partial class StaticUtils{
@@ -169,13 +190,11 @@ namespace jessielesbian.OpenCEX{
 		//But when we run in testing, we use a "balances update replay cache" to detect flash floating and unbacked balances
 		public static readonly bool ReplayBalanceUpdates = Convert.ToBoolean(GetEnv2("ReplayBalanceUpdates", "false"));
 
-#pragma warning disable IDE0075 // Simplify conditional expression
-		public static readonly bool Multiserver = ReducedInitSelector.set ? false : Convert.ToBoolean(GetEnv("Multiserver"));
-#pragma warning restore IDE0075 // Simplify conditional expression
+		public static readonly bool Multiserver = Convert.ToBoolean(GetEnv("Multiserver"));
 
 		private static readonly PooledManualResetEvent depositBlocker = PooledManualResetEvent.GetInstance(false);
 
-		private static readonly string SQLConnectionString = ReducedInitSelector.set ? null : GetEnv("SQLConnectionString");
+		private static readonly string SQLConnectionString = GetEnv("SQLConnectionString");
 
 		public static SQLCommandFactory GetSQL(IsolationLevel isolationLevel){
 			MySqlConnection mySqlConnection = null;
@@ -222,8 +241,8 @@ namespace jessielesbian.OpenCEX{
 		private static readonly JsonSerializerSettings jsonSerializerSettings = new JsonSerializerSettings();
 		public static readonly JsonSerializerSettings oracleJsonSerializerSettings = new JsonSerializerSettings();
 		public static readonly Dictionary<string, RequestMethod> requestMethods = new Dictionary<string, RequestMethod>();
-		public static readonly int MaximumBalanceCacheSize = ReducedInitSelector.set ? 65536 : (int)(Convert.ToUInt32(GetEnv("MaximumBalanceCacheSize")) - 1);
-		public static readonly ushort thrlimit = ReducedInitSelector.set ? ((ushort)64) : Convert.ToUInt16(GetEnv("ExecutionThreadCount"));
+		public static readonly int MaximumBalanceCacheSize = (int)(Convert.ToUInt32(GetEnv("MaximumBalanceCacheSize")) - 1);
+		public static readonly ushort thrlimit = Convert.ToUInt16(GetEnv("ExecutionThreadCount"));
 
 		//OpenCEX.NET Managed Thread
 		private sealed class ManagedAbortThread{
@@ -264,9 +283,6 @@ namespace jessielesbian.OpenCEX{
 			jsonSerializerSettings.MissingMemberHandling = MissingMemberHandling.Error;
 			oracleJsonSerializerSettings.MaxDepth = 6;
 			oracleJsonSerializerSettings.MissingMemberHandling = MissingMemberHandling.Error;
-			if (ReducedInitSelector.set){
-				return;
-			}
 
 			//Native request methods
 			requestMethods.Add("get_test_tokens", TestShitcoins.instance);
@@ -376,7 +392,7 @@ namespace jessielesbian.OpenCEX{
 			}
 		}
 
-		public static readonly string CookieOrigin = ReducedInitSelector.set ? null : GetEnv("CookieOrigin");
+		public static readonly string CookieOrigin = GetEnv("CookieOrigin");
 
 		private static readonly ConcurrentQueue<ConcurrentJob> concurrentJobs = new ConcurrentQueue<ConcurrentJob>();
 
@@ -498,7 +514,7 @@ namespace jessielesbian.OpenCEX{
 		}
 
 		private static volatile int watchdogCounter = 0;
-		private static readonly int MaximumWatchdogLag = ReducedInitSelector.set ? 3 : Convert.ToInt32(GetEnv("MaximumWatchdogLag"));
+		private static readonly int MaximumWatchdogLag = Convert.ToInt32(GetEnv("MaximumWatchdogLag"));
 
 		private static void QOSWatchdog(){
 			while (!abort)
@@ -555,9 +571,7 @@ namespace jessielesbian.OpenCEX{
 				this.reason = reason ?? throw new ArgumentNullException(nameof(reason));
 			}
 		}
-#pragma warning disable IDE0075 // Simplify conditional expression
-		public static readonly bool debug = ReducedInitSelector.set ? true : Convert.ToBoolean(GetEnv("Debug"));
-#pragma warning restore IDE0075 // Simplify conditional expression
+		public static readonly bool debug = Convert.ToBoolean(GetEnv("Debug"));
 
 		[JsonObject(MemberSerialization.Fields)]
 		private sealed class UnprocessedRequest{
@@ -567,7 +581,7 @@ namespace jessielesbian.OpenCEX{
 #pragma warning restore CS0649
 		}
 
-		private static readonly string origin = ReducedInitSelector.set ? null : GetEnv("Origin");
+		private static readonly string origin = GetEnv("Origin");
 
 		//The lead server is responsible for deposit finalization.
 		public static readonly string dyno = GetEnv("DYNO");
@@ -737,10 +751,6 @@ namespace jessielesbian.OpenCEX{
 	public interface ISafetyException
 	{
 
-	}
-
-	public static class ReducedInitSelector{
-		public static bool set = false;
 	}
 
 	public sealed class SharedAuthenticationHint{
