@@ -8,6 +8,7 @@ using System.Runtime.CompilerServices;
 using System.Security.Cryptography;
 using System.Threading;
 using System.Linq;
+using System.Threading.Tasks;
 
 namespace jessielesbian.OpenCEX{
 	public sealed class SQLCommandFactory : IDisposable
@@ -63,182 +64,196 @@ namespace jessielesbian.OpenCEX{
 		public static void ClearBalancesCache(Func<int> action){
 			L3BalancesCache2.Clear2(action);
 		}
-
 		public void DestroyTransaction(bool commit, bool destroy)
 		{
+			StaticUtils.Await2(DestroyTransactionAsync(commit));
+			if(destroy){
+				Dispose();
+			}
+		}
+
+		public async Task DestroyTransactionAsync(bool commit)
+		{
 			RequireTransaction();
-			try
-			{
-				if (commit)
+			Task tsk2 = new Task(new Action(async () => {
+				try
 				{
-					StaticUtils.CheckSafety2(dataReader, "Data reader still open!");
-					Queue<KeyValuePair<string, BigInteger>> pendingFlush;
-					bool doflush2;
-					int limit3 = netBalanceEffects.Count;
-					if (limit3 == 0)
+					if (commit)
 					{
-						pendingFlush = null;
-						doflush2 = false;
-					} else{
-						MySqlCommand update = GetCommand("UPDATE Balances SET Balance = @balance WHERE UserID = @userid AND Coin = @coin AND Balance = @old;");
-						update.Parameters.AddWithValue("@balance", string.Empty);
-						update.Parameters.AddWithValue("@userid", 0UL);
-						update.Parameters.AddWithValue("@coin", string.Empty);
-						update.Parameters.AddWithValue("@old", string.Empty);
-						update.Prepare();
-
-						MySqlCommand insert = GetCommand("INSERT INTO Balances(Balance, UserID, Coin) VALUES (@balance, @userid, @coin);");
-						insert.Parameters.AddWithValue("@balance", string.Empty);
-						insert.Parameters.AddWithValue("@userid", 0UL);
-						insert.Parameters.AddWithValue("@coin", string.Empty);
-						insert.Prepare();
-
-						string[] order;
+						StaticUtils.CheckSafety2(dataReader, "Data reader still open!");
+						Queue<KeyValuePair<string, BigInteger>> pendingFlush;
+						bool doflush2;
+						int limit3 = netBalanceEffects.Count;
+						if (limit3 == 0)
 						{
-							List<string> updates = new List<string>(limit3);
-							foreach (KeyValuePair<string, BigInteger> keyValuePair in netBalanceEffects)
-							{
-								if(!keyValuePair.Value.IsZero){
-									updates.Add(keyValuePair.Key);
-								}
-							}
-
-							updates.Sort();
-
-							order = updates.ToArray();
-							limit3 = order.Length;
+							pendingFlush = null;
+							doflush2 = false;
 						}
-						IDictionary<string, BigInteger> dirtyBalances = new Dictionary<string, BigInteger>(limit3);
-						if (StaticUtils.ReplayBalanceUpdates)
+						else
 						{
-							while (replayedBalanceUpdates.TryDequeue(out ReplayedBalanceUpdate replayed))
+							MySqlCommand update = GetCommand("UPDATE Balances SET Balance = @balance WHERE UserID = @userid AND Coin = @coin AND Balance = @old;");
+							update.Parameters.AddWithValue("@balance", string.Empty);
+							update.Parameters.AddWithValue("@userid", 0UL);
+							update.Parameters.AddWithValue("@coin", string.Empty);
+							update.Parameters.AddWithValue("@old", string.Empty);
+							Task PrepareUpdate = update.PrepareAsync();
+
+							MySqlCommand insert = GetCommand("INSERT INTO Balances(Balance, UserID, Coin) VALUES (@balance, @userid, @coin);");
+							insert.Parameters.AddWithValue("@balance", string.Empty);
+							insert.Parameters.AddWithValue("@userid", 0UL);
+							insert.Parameters.AddWithValue("@coin", string.Empty);
+							Task PrepareInsert = insert.PrepareAsync();
+
+							string[] order;
 							{
-								int pivot = replayed.key.IndexOf('_');
-								int sign = replayed.shift.Sign;
-								if (sign > 0)
+								List<string> updates = new List<string>(limit3);
+								foreach (KeyValuePair<string, BigInteger> keyValuePair in netBalanceEffects)
 								{
-									CreditOrDebit(replayed.key[(pivot + 1)..], Convert.ToUInt64(replayed.key.Substring(0, pivot)), replayed.shift, true, dirtyBalances);
-								}
-								else if (sign < 0)
-								{
-									try{
-										CreditOrDebit(replayed.key[(pivot + 1)..], Convert.ToUInt64(replayed.key.Substring(0, pivot)), replayed.shift * BigInteger.MinusOne, false, dirtyBalances);
-									} catch{
-										Console.Error.WriteLine("Error while replaying debit: " + replayed.failure);
-										throw;
+									if (!keyValuePair.Value.IsZero)
+									{
+										updates.Add(keyValuePair.Key);
 									}
-									
 								}
+
+								updates.Sort();
+
+								order = updates.ToArray();
+								limit3 = order.Length;
 							}
-						} else{
-							for (int i = 0; i < limit3;)
+							IDictionary<string, BigInteger> dirtyBalances = new Dictionary<string, BigInteger>(limit3);
+							if (StaticUtils.ReplayBalanceUpdates)
 							{
-								string key = order[i++];
-								StaticUtils.CheckSafety(netBalanceEffects.TryGetValue(key, out BigInteger bigInteger), "Unable to retrieve net effects (should not reach here)!", true);
-								int pivot = key.IndexOf('_');
-								int sign = bigInteger.Sign;
-								if (sign > 0)
+								while (replayedBalanceUpdates.TryDequeue(out ReplayedBalanceUpdate replayed))
 								{
-									CreditOrDebit(key[(pivot + 1)..], Convert.ToUInt64(key.Substring(0, pivot)), bigInteger, true, dirtyBalances);
+									int pivot = replayed.key.IndexOf('_');
+									int sign = replayed.shift.Sign;
+									if (sign > 0)
+									{
+										CreditOrDebit(replayed.key[(pivot + 1)..], Convert.ToUInt64(replayed.key.Substring(0, pivot)), replayed.shift, true, dirtyBalances);
+									}
+									else if (sign < 0)
+									{
+										try
+										{
+											CreditOrDebit(replayed.key[(pivot + 1)..], Convert.ToUInt64(replayed.key.Substring(0, pivot)), replayed.shift * BigInteger.MinusOne, false, dirtyBalances);
+										}
+										catch
+										{
+											Console.Error.WriteLine("Error while replaying debit: " + replayed.failure);
+											throw;
+										}
+
+									}
 								}
-								else if (sign < 0)
-								{
-									CreditOrDebit(key[(pivot + 1)..], Convert.ToUInt64(key.Substring(0, pivot)), bigInteger * BigInteger.MinusOne, false, dirtyBalances);
-								}
-							}
-						}
-						
-
-						netBalanceEffects.Clear();
-
-						pendingFlush = new Queue<KeyValuePair<string, BigInteger>>();
-						
-						foreach (KeyValuePair<string, BigInteger> balanceUpdate in dirtyBalances)
-						{
-							//Flush dirty balances
-							string key = balanceUpdate.Key;
-							int pivot = key.IndexOf('_');
-
-							MySqlCommand command;
-							if (OriginalBalances.TryGetValue(key, out string oldbal))
-							{
-								command = update;
-								command.Parameters["@old"].Value = oldbal;
 							}
 							else
 							{
-								command = insert;
+								for (int i = 0; i < limit3;)
+								{
+									string key = order[i++];
+									StaticUtils.CheckSafety(netBalanceEffects.TryGetValue(key, out BigInteger bigInteger), "Unable to retrieve net effects (should not reach here)!", true);
+									int pivot = key.IndexOf('_');
+									int sign = bigInteger.Sign;
+									if (sign > 0)
+									{
+										CreditOrDebit(key[(pivot + 1)..], Convert.ToUInt64(key.Substring(0, pivot)), bigInteger, true, dirtyBalances);
+									}
+									else if (sign < 0)
+									{
+										CreditOrDebit(key[(pivot + 1)..], Convert.ToUInt64(key.Substring(0, pivot)), bigInteger * BigInteger.MinusOne, false, dirtyBalances);
+									}
+								}
 							}
 
-							command.Parameters["@balance"].Value = balanceUpdate.Value.ToString();
-							command.Parameters["@userid"].Value = Convert.ToUInt64(key.Substring(0, pivot));
-							command.Parameters["@coin"].Value = key[(pivot + 1)..];
 
-							try
+							netBalanceEffects.Clear();
+
+							pendingFlush = new Queue<KeyValuePair<string, BigInteger>>();
+
+							Queue<Task<int>> completes = new Queue<Task<int>>();
+							Queue<string> invalidates = new Queue<string>();
+
+							foreach (KeyValuePair<string, BigInteger> balanceUpdate in dirtyBalances)
 							{
-								command.SafeExecuteNonQuery();
+								//Flush dirty balances
+								string key = balanceUpdate.Key;
+								int pivot = key.IndexOf('_');
+
+								MySqlCommand command;
+								if (OriginalBalances.TryGetValue(key, out string oldbal))
+								{
+									if(!(PrepareUpdate is null)){
+										await PrepareUpdate;
+										PrepareUpdate = null;
+									}
+									command = update;
+									command.Parameters["@old"].Value = oldbal;
+								}
+								else
+								{
+									if (!(PrepareInsert is null))
+									{
+										await PrepareInsert;
+										PrepareInsert = null;
+									}
+									command = insert;
+								}
+
+								command.Parameters["@balance"].Value = balanceUpdate.Value.ToString();
+								command.Parameters["@userid"].Value = Convert.ToUInt64(key.Substring(0, pivot));
+								command.Parameters["@coin"].Value = key[(pivot + 1)..];
+								completes.Enqueue(command.ExecuteNonQueryAsync());
+								invalidates.Enqueue(key);
+
+								//Prepare to write to cache
+								pendingFlush.Enqueue(balanceUpdate);
 							}
-							catch (Exception e)
-							{
-								Console.Error.WriteLine("Invalidating balances cache entry due to exception: " + e.ToString());
-								L3BalancesCache2.Clear(key);
-								throw e;
-							}
-
-							//Prepare to write to cache
-							pendingFlush.Enqueue(balanceUpdate);
-						}
-						doflush2 = true;
-					}
-
-
-					mySqlTransaction.Commit();
-					mySqlTransaction = null;
-
-					if (postCommit != null)
-					{
-						StaticUtils.Append(postCommit);
-						postCommit = null;
-					}
-					if(doflush2 && (!StaticUtils.Multiserver)){
-						while (pendingFlush.TryDequeue(out KeyValuePair<string, BigInteger> result))
-						{
 							try{
-								L3BalancesCache2.UpdateOrAdd(result.Key, result.Value);
-								
+								while (completes.TryDequeue(out Task<int> tsk))
+								{
+									StaticUtils.CheckSafety(await tsk == 1, "Improper balances write effects (should not reach here)!", true);
+								}
 							} catch (Exception e){
-								Console.Error.WriteLine("Invalidating balances cache entry due to exception: " + e.ToString());
+								if (StaticUtils.Multiserver)
+								{
+									Console.Error.WriteLine("Error writing to balances cache: " + e);
+								} else{
+									Console.Error.WriteLine("Invalidating balances cache due to exception while flushing to database: " + e);
+									while (invalidates.TryDequeue(out string ky2))
+									{
+										L3BalancesCache2.Clear(ky2);
+									}
+								}
+								throw;
 							}
+							doflush2 = true;
 						}
+						
 
-						//Release balances cache locks (battle override active)
-						while (pendingLockRelease.TryDequeue(out string result))
-						{
-							try
-							{
-								L3BalancesCache2.Unlock(result);
-							}
-							catch (Exception e)
-							{
-								Console.Error.WriteLine("Error while unlocking balances cache: " + e.ToString());
-							}
-						}
-					}
-				}
-				else
-				{
-					try{
-						if (dataReader != null)
-						{
-							SafeDestroyReader();
-						}
-						mySqlTransaction.Rollback();
-						mySqlTransaction.Dispose();
-					} finally{
+						mySqlTransaction.Commit();
 						mySqlTransaction = null;
-						netBalanceEffects.Clear();
-						//Release balances cache locks (battle override active)
-						if(!StaticUtils.Multiserver){
+
+						if (postCommit != null)
+						{
+							StaticUtils.Append(postCommit);
+							postCommit = null;
+						}
+						if (doflush2 && (!StaticUtils.Multiserver))
+						{
+							while (pendingFlush.TryDequeue(out KeyValuePair<string, BigInteger> result))
+							{
+								try
+								{
+									L3BalancesCache2.UpdateOrAdd(result.Key, result.Value);
+
+								}
+								catch (Exception e)
+								{
+									Console.Error.WriteLine("Invalidating balances cache entry due to exception: " + e.ToString());
+								}
+							}
+
+							//Release balances cache locks (battle override active)
 							while (pendingLockRelease.TryDequeue(out string result))
 							{
 								try
@@ -252,24 +267,53 @@ namespace jessielesbian.OpenCEX{
 							}
 						}
 					}
+					else
+					{
+						try
+						{
+							if (dataReader != null)
+							{
+								SafeDestroyReader();
+							}
+							mySqlTransaction.Rollback();
+							mySqlTransaction.Dispose();
+						}
+						finally
+						{
+							mySqlTransaction = null;
+							netBalanceEffects.Clear();
+							//Release balances cache locks (battle override active)
+							if (!StaticUtils.Multiserver)
+							{
+								while (pendingLockRelease.TryDequeue(out string result))
+								{
+									try
+									{
+										L3BalancesCache2.Unlock(result);
+									}
+									catch (Exception e)
+									{
+										Console.Error.WriteLine("Error while unlocking balances cache: " + e.ToString());
+									}
+								}
+							}
+						}
+					}
 				}
-
-				if (destroy)
+				catch (Exception e)
 				{
-					Dispose();
+					if (e is ISafetyException)
+					{
+						throw;
+					}
+					else
+					{
+						throw new SafetyException("Unable to destroy MySQL transaction!", e);
+					}
 				}
-
-			}
-			catch (Exception e)
-			{
-				if(e is ISafetyException)
-				{
-					throw;
-				} else
-				{
-					throw new SafetyException("Unable to destroy MySQL transaction!", e);
-				}
-			}
+			}));
+			tsk2.Start();
+			await tsk2;		
 		}
 
 		/// <summary>
