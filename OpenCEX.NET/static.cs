@@ -60,7 +60,7 @@ namespace jessielesbian.OpenCEX{
 		private int noexec = 0;
 		public void Execute(){
 			try{
-				StaticUtils.CheckSafety2(Interlocked.Exchange(ref noexec, 1) == 1, "Job already executed!");
+				StaticUtils.CheckSafety2(Interlocked.Exchange(ref noexec, 1) == 1, "Job already executed (should not reach here)!", true);
 				returns = ExecuteIMPL();
 			} catch(Exception e){
 				exception = e;
@@ -69,7 +69,7 @@ namespace jessielesbian.OpenCEX{
 			}
 		}
 		public Task<object> ExecuteAsTask(){
-			StaticUtils.CheckSafety2(Interlocked.Exchange(ref noexec, 1) == 1, "Job already executed!");
+			StaticUtils.CheckSafety2(Interlocked.Exchange(ref noexec, 1) == 1, "Job already executed (should not reach here)!", true);
 			Task<object> ret = new Task<object>(ExecuteIMPL);
 			ret.Start();
 			ApplyCompletionResult(ret);
