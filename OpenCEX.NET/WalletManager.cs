@@ -29,20 +29,17 @@ namespace jessielesbian.OpenCEX
 {
 	public static partial class StaticUtils
 	{
-		public static readonly string ExchangeWalletAddress = BlockchainManager.MintME.ExchangeWalletManager.address;
+		public static readonly string ExchangeWalletAddress = BlockchainManager.Fake.ExchangeWalletManager.address;
 		public static readonly BlockParameter latestBlock = BlockParameter.CreateLatest();
 	}
 	public sealed class BlockchainManager{
 		public readonly string node;
 		public readonly ulong chainid;
-		public static readonly BlockchainManager MintME = new BlockchainManager("https://mintme.polyeubitoken.com/", 24734);
-
-		public static readonly BlockchainManager Polygon = new BlockchainManager("https://polygon-rpc.com", 137);
-		public static readonly BlockchainManager BinanceSmartChain = new BlockchainManager("https://bscrpc.com", 56);
+		public static readonly BlockchainManager Fake = new BlockchainManager("https://www.google.com", 12345);
 		public readonly RpcClient rpc;
 		public readonly string tail1;
 		public readonly WalletManager ExchangeWalletManager;
-		private BlockchainManager(string node, ulong chainid)
+		public BlockchainManager(string node, ulong chainid)
 		{
 			this.node = node ?? throw new ArgumentNullException(nameof(node));
 			this.chainid = chainid;
@@ -343,22 +340,7 @@ namespace jessielesbian.OpenCEX
 						data = mySqlDataReader.GetString("DataOrAmount");
 						amt = zero;
 					}
-					BlockchainManager blockchainManager;
-					switch (mySqlDataReader.GetUInt64("Blockchain"))
-					{
-						case 24734:
-							blockchainManager = BlockchainManager.MintME;
-							break;
-						case 137:
-							blockchainManager = BlockchainManager.Polygon;
-							break;
-						case 56:
-							blockchainManager = BlockchainManager.BinanceSmartChain;
-							break;
-						default:
-							ThrowInternal2("Invalid blockchain (should not reach here)!");
-							return;
-					}
+					CheckSafety(blockchains2.TryGetValue(mySqlDataReader.GetUInt64("Blockchain"), out BlockchainManager blockchainManager), "Unknown blockchain (should not reach here)!", true);
 					gas = GetBigInteger(mySqlDataReader.GetString("Gas"));
 					cred2 = GetBigInteger(mySqlDataReader.GetString("CreditAmountSuccess"));
 					gasPrice = GetBigInteger(mySqlDataReader.GetString("GasPrice"));

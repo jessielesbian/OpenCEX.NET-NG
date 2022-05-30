@@ -245,14 +245,7 @@ namespace jessielesbian.OpenCEX{
 
 				CheckSafety(fillMode > -1, "Invalid fill mode!");
 				CheckSafety(fillMode < 3, "Invalid fill mode!");
-				try
-				{
-					GetEnv("PairExists_" + primary.Replace("_", "__") + "_" + secondary);
-				}
-				catch
-				{
-					throw new SafetyException("Nonexistant trading pair!");
-				}
+				CheckSafety(pairs.ContainsKey(primary + '_' + secondary.Replace("_", "__")), "Nonexistant trading pair!");
 
 				string selected;
 				string output;
@@ -692,44 +685,10 @@ namespace jessielesbian.OpenCEX{
 					request.args.TryGetValue("token", out object temp);
 					token = (string)temp;
 				}
-				BlockchainManager blockchainManager;
-				switch (token)
-				{
-					//Traditional tokens
-					case "EUBI":
-					case "1000x":
-					case "CLICK":
-					case "Haoma":
-					case "MS-Coin":
-						blockchainManager = BlockchainManager.MintME;
-						break;
-					case "MATIC":
-					case "PolyEUBI":
-					case "Dai":
-						blockchainManager = BlockchainManager.Polygon;
-						break;
-					case "BNB":
-						blockchainManager = BlockchainManager.BinanceSmartChain;
-						break;
 
-					//Multichain (MintME-Polygon) token
-					case "MintME":
-						string blockchain;
-						{
-							CheckSafety(request.args.TryGetValue("blockchain", out object tm), "Must specify blockchain for multichain token!");
-							blockchain = (string)tm;
-						}
-						blockchainManager = blockchain switch
-						{
-							"MintME" => BlockchainManager.MintME,
-							"Polygon" => BlockchainManager.Polygon,
-							_ => throw new SafetyException("Unsupported blockchain!"),
-						};
-						break;
-					//Unknown tokens
-					default:
-						throw new SafetyException("Unknown token!");
-				}
+				CheckSafety(coins.TryGetValue(token, out CoinDescriptor coinDescriptor), "Unknown token!");
+				BlockchainManager blockchainManager = coinDescriptor.blockchainManager;
+				
 				ulong userid = request.GetUserID();
 
 				MySqlDataReader reader = request.sqlCommandFactory.SafeExecuteReader(request.sqlCommandFactory.GetCommand("SELECT DepositPrivateKey FROM Accounts WHERE UserID = " + userid + ";"));
@@ -879,7 +838,7 @@ namespace jessielesbian.OpenCEX{
 				else if (ret is Dictionary<string, string> balances)
 				{
 					List<string[]> returning = new List<string[]>();
-					foreach (string token in listedTokensHint)
+					foreach (string token in coins.Keys)
 					{
 						if (balances.TryGetValue(token, out string bal))
 						{
@@ -994,7 +953,7 @@ namespace jessielesbian.OpenCEX{
 				}
 				else if (ret is string str)
 				{
-					return BlockchainManager.MintME.GetWalletManager(str).address;
+					return BlockchainManager.Fake.GetWalletManager(str).address;
 				}
 				else
 				{
@@ -1099,173 +1058,62 @@ namespace jessielesbian.OpenCEX{
 				string token = request.ExtractRequestArg<string>("token");
 				string address = request.ExtractRequestArg<string>("address");
 				BigInteger amount = request.ExtractBigInteger("amount");
-				BlockchainManager blockchainManager;
-				switch (token)
-				{
-					//LP tokens
-					case "LP_MATIC_PolyEUBI":
-						BurnLP(request.sqlCommandFactory, "MATIC", "PolyEUBI", amount, userid);
-						return null;
-					case "LP_MintME_MATIC":
-						BurnLP(request.sqlCommandFactory, "MintME", "MATIC", amount, userid);
-						return null;
-					case "LP_MintME_BNB":
-						BurnLP(request.sqlCommandFactory, "MintME", "BNB", amount, userid);
-						return null;
-					case "LP_MintME_CLICK":
-						BurnLP(request.sqlCommandFactory, "MintME", "CLICK", amount, userid);
-						return null;
-					case "LP_MintME_Haoma":
-						BurnLP(request.sqlCommandFactory, "MintME", "Haoma", amount, userid);
-						return null;
-					case "LP_MintME_MS-Coin":
-						BurnLP(request.sqlCommandFactory, "MintME", "MS-Coin", amount, userid);
-						return null;
-					case "LP_MintME_PolyEUBI":
-						BurnLP(request.sqlCommandFactory, "MintME", "PolyEUBI", amount, userid);
-						return null;
-					case "LP_MintME_EUBI":
-						BurnLP(request.sqlCommandFactory, "MintME", "EUBI", amount, userid);
-						return null;
-					case "LP_MintME_1000x":
-						BurnLP(request.sqlCommandFactory, "MintME", "1000x", amount, userid);
-						return null;
-					case "LP_BNB_PolyEUBI":
-						BurnLP(request.sqlCommandFactory, "BNB", "PolyEUBI", amount, userid);
-						return null;
-					case "LP_shitcoin_scamcoin":
-						BurnLP(request.sqlCommandFactory, "shitcoin", "scamcoin", amount, userid);
-						return null;
-
-					//Traditional tokens
-					case "MATIC":
-					case "PolyEUBI":
-					case "Dai":
-						blockchainManager = BlockchainManager.Polygon;
-						break;
-					case "EUBI":
-					case "1000x":
-					case "CLICK":
-					case "Haoma":
-					case "MS-Coin":
-						blockchainManager = BlockchainManager.MintME;
-						break;
-					case "BNB":
-						blockchainManager = BlockchainManager.BinanceSmartChain;
-						break;
-
-					//Multichain tokens
-					case "MintME":
-						string blockchain;
-						{
-							CheckSafety(request.args.TryGetValue("blockchain", out object tm), "Must specify blockchain for multichain token!");
-							blockchain = (string)tm;
-						}
-						blockchainManager = blockchain switch
-						{
-							"MintME" => BlockchainManager.MintME,
-							"Polygon" => BlockchainManager.Polygon,
-							_ => throw new SafetyException("Unsupported blockchain!"),
-						};
-						break;
-
-					//Unsupported tokens
-					default:
-						throw new SafetyException("Unsupported token!");
-				}
+				CheckSafety(coins.TryGetValue(token, out CoinDescriptor coinDescriptor), "Unknown token!");
+				BlockchainManager blockchainManager = coinDescriptor.blockchainManager;
 				WalletManager walletManager = blockchainManager.ExchangeWalletManager;
 				BigInteger gasPrice = walletManager.GetGasPrice();
 				//Boost gas price to reduce server waiting time.
 				gasPrice = gasPrice.Add(gasPrice.Div(ten));
-				string tokenAddress;
-				bool backed;
-				switch (token)
-				{
-					case "MS-Coin":
-						tokenAddress = "0x34c171a4ee5a3e6ad7ea1b356600e30d7c333d5e";
-						backed = false;
+				string tokenAddress = coinDescriptor.address;
+
+				switch(coinDescriptor.coinType){
+					case CoinType.Native:
+						//Verify address
+						VerifyAddress(address);
+
+						//Estimate gas
+						CheckSafety(walletManager.EstimateGas(address, gasPrice, amount, "") == basegas, "Withdraw to contract not supported!");
+						BigInteger withfee = amount.Add(gasPrice.Mul(basegas));
+
+						request.Debit(token, userid, withfee, false);
+
+						//Send withdrawal later
+						walletManager.Unsafe_SafeSendEther(request.sqlCommandFactory, amount, address, gasPrice, basegas, null, userid, false, token, withfee, token);
 						break;
-					case "CLICK":
-						tokenAddress = "0xf4811b341af177bde2407b976311af66c4b08021";
-						backed = false;
-						break;
-					case "Haoma":
-						tokenAddress = "0x60ac85dda46937251eb7473a68a1b9367ee2a1f1";
-						backed = false;
-						break;
-					case "PolyEUBI":
-						tokenAddress = "0x553e77f7f71616382b1545d4457e2c1ee255fa7a";
-						backed = false;
-						break;
-					case "EUBI":
-						tokenAddress = "0x8afa1b7a8534d519cb04f4075d3189df8a6738c1";
-						backed = false;
-						break;
-					case "1000x":
-						tokenAddress = "0x7b535379bbafd9cd12b35d91addabf617df902b2";
-						backed = false;
-						break;
-					case "Dai":
-						tokenAddress = "0x8f3cf7ad23cd3cadbd9735aff958023239c6a063";
-						backed = false;
-						break;
-					case "MintME":
+					case CoinType.ERC20:
+						string gastoken;
 						if (blockchainManager.chainid == 24734)
 						{
-							tokenAddress = null;
-							backed = false;
+							gastoken = "MintME";
 						}
 						else
 						{
-							tokenAddress = "0x2b7bede8a97021da880e6c84e8b915492d2ae216";
-							backed = true;
+							gastoken = "MATIC";
 						}
+
+						//Prepare ABI
+						string data = "0xa9059cbb" + ExpandABIAddress(address) + amount.ToHex(false, true);
+
+						//Estimate gas
+						BigInteger gas = walletManager.EstimateGas(tokenAddress, gasPrice, zero, data);
+
+						//Debit unbacked gas fees
+						request.Debit(gastoken, userid, gasPrice.Mul(gas), false);
+
+						request.Debit(token, userid, amount, false);
+
+						//Send withdrawal later
+						walletManager.Unsafe_SafeSendEther(request.sqlCommandFactory, amount, tokenAddress, gasPrice, gas, data, userid, false, token, amount, token);
+						break;
+					case CoinType.LP:
+						CheckSafety(token.StartsWith("LP_"), "Illegal LP token name (should not reach here)!", true);
+						token = token[3..];
+						CheckSafety(pairs.TryGetValue(token, out Pair pair), "Missing underlying pair (should not reach here)!", true);
+						
+						BurnLP(request.sqlCommandFactory, pair.name0, pair.name1, amount, userid);
 						break;
 					default:
-						tokenAddress = null;
-						backed = false;
-						break;
-				}
-
-				if (tokenAddress is null)
-				{
-					//Verify address
-					VerifyAddress(address);
-
-					//Estimate gas
-					CheckSafety(walletManager.EstimateGas(address, gasPrice, amount, "") == basegas, "Withdraw to contract not supported!");
-					BigInteger withfee = amount.Add(gasPrice.Mul(basegas));
-
-					request.Debit(token, userid, withfee, false);
-
-					//Send withdrawal later
-					walletManager.Unsafe_SafeSendEther(request.sqlCommandFactory, amount, address, gasPrice, basegas, null, userid, false, token, withfee, token);
-				}
-				else
-				{
-					string gastoken;
-					if (blockchainManager.chainid == 24734)
-					{
-						gastoken = "MintME";
-					}
-					else
-					{
-						gastoken = "MATIC";
-					}
-
-					//Prepare ABI
-					string data = "0xa9059cbb" + ExpandABIAddress(address) + amount.ToHex(false, true);
-
-					//Estimate gas
-					BigInteger gas = walletManager.EstimateGas(tokenAddress, gasPrice, zero, data);
-
-					//Debit unbacked gas fees
-					request.Debit(gastoken, userid, gasPrice.Mul(gas), false);
-
-					request.Debit(token, userid, amount, backed);
-
-					//Send withdrawal later
-					walletManager.Unsafe_SafeSendEther(request.sqlCommandFactory, amount, tokenAddress, gasPrice, gas, data, userid, false, token, amount, token);
+						throw new SafetyException("Non-withdrawable token!");
 				}
 
 				return null;
@@ -1519,14 +1367,7 @@ namespace jessielesbian.OpenCEX{
 					CheckSafety(request.args.TryGetValue("secondary", out temp));
 					sec = (string)temp;
 				}
-				try
-				{
-					GetEnv("PairExists_" + pri.Replace("_", "__") + "_" + sec);
-				}
-				catch
-				{
-					throw new SafetyException("Non-existant trading pair!");
-				}
+				CheckSafety(pairs.ContainsKey(pri + '_' + sec.Replace("_", "__")), "Nonexistant trading pair!");
 
 				Queue<Candle> objects = new Queue<Candle>();
 				MySqlCommand mySqlCommand = request.sqlCommandFactory.GetCommand("SELECT Timestamp, Open, High, Low, Close, Timestamp FROM HistoricalPrices WHERE Pri = @primary AND Sec = @secondary ORDER BY Timestamp ASC LIMIT 60;");
@@ -1590,14 +1431,7 @@ namespace jessielesbian.OpenCEX{
 					CheckSafety(request.args.TryGetValue("amount1", out temp), "Missing secondary amount!");
 					amount1 = GetBigInteger((string)temp);
 				}
-				try
-				{
-					GetEnv("PairExists_" + pri.Replace("_", "__") + "_" + sec);
-				}
-				catch
-				{
-					throw new SafetyException("Nonexistant trading pair!");
-				}
+				CheckSafety(pairs.ContainsKey(pri + '_' + sec.Replace("_", "__")), "Nonexistant trading pair!");
 				LPReserve lpreserve = new LPReserve(request.sqlCommandFactory, pri, sec);
 
 				if (!(lpreserve.reserve0.IsZero || lpreserve.reserve1.IsZero))

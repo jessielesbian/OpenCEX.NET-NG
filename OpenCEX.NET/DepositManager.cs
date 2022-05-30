@@ -7,9 +7,6 @@ using System.Data;
 using System.Threading;
 namespace jessielesbian.OpenCEX{
 	public static partial class StaticUtils{
-		public static readonly WalletManager defaultMintMEWallet = BlockchainManager.MintME.ExchangeWalletManager;
-		public static readonly WalletManager defaultBSCWallet = BlockchainManager.BinanceSmartChain.ExchangeWalletManager;
-		public static readonly WalletManager defaultPolyWallet = BlockchainManager.Polygon.ExchangeWalletManager;
 		private static void DepositManager(){
 			while (!abort)
 			{
@@ -20,7 +17,16 @@ namespace jessielesbian.OpenCEX{
 				}
 				else
 				{
-					ConcurrentJob[] updates = new ConcurrentJob[] { defaultMintMEWallet.GetUpdate(), defaultBSCWallet.GetUpdate(), defaultPolyWallet.GetUpdate() };
+					ConcurrentJob[] updates;
+					{
+						Queue<ConcurrentJob> updates2 = new Queue<ConcurrentJob>();
+						foreach (BlockchainManager blockchainManager in blockchains.Values)
+						{
+							updates2.Enqueue(blockchainManager.ExchangeWalletManager.GetUpdate());
+						}
+						updates = updates2.ToArray();
+					}
+
 					Append(updates);
 					try
 					{
@@ -134,39 +140,8 @@ namespace jessielesbian.OpenCEX{
 				}
 				//[txid, amount]
 				string[] misc = url2.Split('_');
-				WalletManager walletManager;
-				bool backed;
-				string url3 = url1;
-				switch(url3)
-				{
-					case "MintME":
-					case "EUBI":
-					case "1000x":
-					case "CLICK":
-					case "Haoma":
-					case "MS-Coin":
-						walletManager = BlockchainManager.MintME.ExchangeWalletManager;
-						backed = false;
-						break;
-					case "BNB":
-						walletManager = BlockchainManager.BinanceSmartChain.ExchangeWalletManager;
-						backed = false;
-						break;
-					case "MATIC":
-					case "PolyEUBI":
-					case "Dai":
-						walletManager = BlockchainManager.Polygon.ExchangeWalletManager;
-						backed = false;
-						break;
-					case "WMintME":
-						walletManager = BlockchainManager.Polygon.ExchangeWalletManager;
-						backed = true;
-						url3 = "MintME";
-						break;
-					default:
-						ThrowInternal2("Unknown token in Deposit Manager (should not reach here)!");
-						return null;
-				}
+				CheckSafety(coins.TryGetValue(url1, out CoinDescriptor coinDescriptor), "Unknown coin (should not reach here)!", true);
+				WalletManager walletManager = coinDescriptor.blockchainManager.ExchangeWalletManager;
 
 				TransactionReceipt transaction = walletManager.GetTransactionReceipt("0x" + misc[0]);
 				ulong safeheight = walletManager.SafeBlockheight;
@@ -194,7 +169,7 @@ namespace jessielesbian.OpenCEX{
 								if (GetBigInteger(Convert.ToString(transaction.status)) == one)
 								{
 									//UNSAFE credit, since we are adding newly-deposited funds
-									sqlCommandFactory.Credit(url3, userid, GetBigInteger(misc[1]), backed);
+									sqlCommandFactory.Credit(url1, userid, GetBigInteger(misc[1]), false);
 								}
 								sqlCommandFactory.DestroyTransaction(true, true);
 							}
